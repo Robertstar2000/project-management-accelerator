@@ -1,0 +1,275 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Type } from "@google/genai";
+import { logAction } from '../utils/logging';
+import { PROMPTS } from '../constants/projectData';
+import { ChangeDeploymentModal } from '../components/ChangeDeploymentModal';
+import { parseImpact, applyImpact } from '../utils/be-logic';
+import { getGeminiClient } from '../utils/geminiClient';
+
+// Safety limits for API payload
+const MAX_PAYLOAD_CHARS = 20000; // Drastically reduced to prevent potential 500 errors from large requests.
+
+const truncatePrompt = (prompt: string): string => {
+    if (prompt.length <= MAX_PAYLOAD_CHARS) {
+        return prompt;
+    }
+
+    console.warn('Prompt is too large, truncating from the end to fit payload limits.');
+    logAction('Truncate Prompt', 'Payload Management', { originalLength: prompt.length, newLength: MAX_PAYLOAD_CHARS });
+    
+    return prompt.substring(0, MAX_PAYLOAD_CHARS) + "\n...[PROMPT TRUNCATED DUE TO PAYLOAD SIZE]...";
+};
+
+// Fix: Removed ai prop as instances will be initialized locally before use.
+export const RevisionControlView = ({ project, onUpdateProject }: {project: any, onUpdateProject: (update: any) => void}) => {
+    const { changeRequest: cr, scenarios, name, discipline, tasks, documents, budget, endDate } = project;
+    const [newScenario, setNewScenario] = useState({ name: '', impactStr: '' });
+    const [deploymentPlan, setDeploymentPlan] = useState('');
+    const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+    const [isDeploying, setIsDeploying] = useState(false);
+    const [isEstimating, setIsEstimating] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleCrChange = (newCrData) => {
+        onUpdateProject({ changeRequest: newCrData });
+        logAction('Update Change Request', name, newCrData);
+    };
+
+    const handleScenariosChange = (newScenarios) => {
+        onUpdateProject({ scenarios: newScenarios });
+        logAction('Update Scenarios', name, newScenarios);
+    };
+
+    const handleAddScenario = (e) => {
+        e.preventDefault();
+        if (newScenario.name && newScenario.impactStr) {
+            const updatedScenarios = [...scenarios, { id: Date.now(), ...newScenario }];
+            handleScenariosChange(updatedScenarios);
+            setNewScenario({ name: '', impactStr: '' });
+        }
+    };
+    
+    const handleEstimateImpact = async () => {
+        if (!cr.title || !cr.reason) {
+            alert("Please provide a title and reason for the change request before estimating impact.");
+            return;
+        }
+        // Fix: Initialize AI locally as per guidelines.
+        const ai = getGeminiClient();
+        
+        setIsEstimating(true);
+        setError('');
+        try {
+            const prompt = PROMPTS.estimateChangeImpact(name, discipline, budget, cr);
+            const schema = {
+                type: Type.OBJECT,
+                properties: {
+                    days: { type: Type.NUMBER, description: 'Estimated schedule impact in days (positive for delay, negative for acceleration).' },
+                    cost: { type: Type.NUMBER, description: 'Estimated budget impact in currency (positive for cost increase, negative for savings).' }
+                },
+                required: ['days', 'cost']
+            };
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: "application/json", responseSchema: schema },
+            });
+            const impact = JSON.parse(response.text);
+            const newImpactStr = `${impact.days >= 0 ? '+' : ''}${impact.days}d ${impact.cost >= 0 ? '+' : ''}${impact.cost}c`;
+            handleCrChange({ ...cr, impactStr: newImpactStr });
+        } catch (err) {
+            console.error("API Error estimating impact:", err);
+            setError("Failed to estimate impact. Please check the console and try again.");
+        } finally {
+            setIsEstimating(false);
+        }
+    };
+
+    const handleGeneratePlan = async () => {
+        if (!cr.title || !cr.reason) {
+            alert("Please provide a title and reason for the change request before generating a plan.");
+            return;
+        }
+        // Fix: Initialize AI locally right before usage.
+        const ai = getGeminiClient();
+
+        setIsGeneratingPlan(true);
+        setError('');
+        try {
+            const promptFn = PROMPTS.changeDeploymentPlan;
+            const promptText = promptFn(name, discipline, cr, tasks, documents);
+            const prompt = truncatePrompt(promptText);
+            logAction('Generate Change Plan', name, { promptLength: prompt.length });
+            
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: prompt,
+            });
+
+            setDeploymentPlan(response.text);
+            logAction('Generate Change Plan Success', name, { plan: response.text });
+        } catch (err) {
+            console.error("API Error generating deployment plan:", err);
+            setError("Failed to generate the deployment plan. Please check the console and try again.");
+            logAction('Generate Change Plan Failure', name, { error: err.message });
+        } finally {
+            setIsGeneratingPlan(false);
+        }
+    };
+
+    const baseline = useMemo(() => ({
+        budget: budget,
+        endDate: endDate,
+    }), [budget, endDate]);
+    
+    const crImpact = useMemo(() => parseImpact(cr.impactStr), [cr.impactStr]);
+    const crResult = useMemo(() => applyImpact(baseline, crImpact), [baseline, crImpact]);
+
+    const scenarioResults = useMemo(() => scenarios.map(s => ({
+        ...s,
+        impact: parseImpact(s.impactStr),
+        result: applyImpact(baseline, parseImpact(s.impactStr))
+    })), [scenarios, baseline]);
+
+    const currencyFormat = (num) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
+    
+    const ImpactCell = ({ value, base }) => {
+        const diff = value - base;
+        const className = diff > 0 ? 'impact-positive' : diff < 0 ? 'impact-negative' : '';
+        const sign = diff > 0 ? '+' : '';
+        return <>{currencyFormat(value)} {diff !== 0 && <span className={className}>({sign}{currencyFormat(diff)})</span>}</>
+    };
+
+    const handleSaveChange = () => {
+        if (!cr.title) {
+            alert("Please provide a title for the change request before saving.");
+            return;
+        }
+
+        const changeDocContent = `
+# Change Request: ${cr.title}
+
+## Reason for Change
+${cr.reason}
+
+## Estimated Impact
+- **Time:** ${crImpact.days > 0 ? '+' : ''}${crImpact.days} days
+- **Cost:** ${crImpact.cost > 0 ? '+' : ''}${currencyFormat(crImpact.cost)}
+
+## What-If Scenarios Analysis
+
+| Metric   | Baseline              | CR Impact             | ${scenarios.map(s => s.name).join(' | ')} |
+|----------|-----------------------|-----------------------|${scenarios.map(() => '-----------------------').join('|')}
+| End Date | ${baseline.endDate}   | ${crResult.endDate}   | ${scenarioResults.map(s => s.result.endDate).join(' | ')} |
+| Budget   | ${currencyFormat(baseline.budget)} | ${currencyFormat(crResult.budget)} | ${scenarioResults.map(s => currencyFormat(s.result.budget)).join(' | ')} |
+`;
+
+        const newDoc = {
+            id: `doc-cr-${Date.now()}`,
+            title: `Change Request: ${cr.title}`,
+            version: 'v1.0',
+            status: 'Working',
+            owner: 'A. User',
+            phase: 8, // Associate with Sprint/Critical Design Planning
+            content: changeDocContent.trim(),
+        };
+
+        const updatedDocuments = [...documents, newDoc];
+        onUpdateProject({ documents: updatedDocuments });
+
+        logAction('Save Change Request as Document', name, { document: newDoc });
+        alert(`Document "${newDoc.title}" has been created and added to the Documents Center for approval.`);
+    };
+
+    return (
+        <div className="tool-card">
+            <h2 className="subsection-title">Revision & Change Control</h2>
+            <div className="tool-grid" style={{ gridTemplateColumns: '1fr 2fr', gap: '2rem', alignItems: 'start' }}>
+                <div>
+                    <h4>Submit Change Request</h4>
+                    <form>
+                        <div className="form-group"><label>Title</label><input type="text" placeholder="Add new login provider" value={cr.title} onChange={e => handleCrChange({...cr, title: e.target.value})} /></div>
+                        <div className="form-group"><label>Reason for Change</label><textarea rows={3} placeholder="User request for SSO" value={cr.reason} onChange={e => handleCrChange({...cr, reason: e.target.value})}></textarea></div>
+                        <div className="form-group">
+                            <label>Impact (e.g. +15d +5000c)</label>
+                            <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                                <input type="text" placeholder="+15d +5000c" value={cr.impactStr} onChange={e => handleCrChange({...cr, impactStr: e.target.value})} style={{flexGrow: 1}}/>
+                                <button type="button" className="button button-small" onClick={handleEstimateImpact} disabled={isEstimating}>
+                                    {isEstimating ? '...' : 'Estimate'}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                    
+                    <h4 style={{marginTop: '2rem'}}>What-If Scenarios</h4>
+                    <form onSubmit={handleAddScenario} style={{display: 'flex', gap: '1rem'}}>
+                         <input type="text" placeholder="Scenario Name" value={newScenario.name} onChange={e => setNewScenario({...newScenario, name: e.target.value})} style={{flex: 1}}/>
+                         <input type="text" placeholder="+10d -2000c" value={newScenario.impactStr} onChange={e => setNewScenario({...newScenario, impactStr: e.target.value})} style={{flex: 1}}/>
+                         <button type="submit" className="button button-small">Add</button>
+                    </form>
+                </div>
+                <div>
+                    <h4>Auto Impact Analysis for &quot;{cr.title}&quot;</h4>
+                    <table className="impact-table">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Baseline</th>
+                                <th>CR Impact</th>
+                                {scenarioResults.map(s => <th key={s.id}>{s.name}</th>)}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>End Date</td>
+                                <td>{baseline.endDate}</td>
+                                <td>{crResult.endDate} <span className={crImpact.days > 0 ? 'impact-positive' : ''}>{crImpact.days !== 0 && `(${crImpact.days > 0 ? '+':''}${crImpact.days}d)`}</span></td>
+                                {scenarioResults.map(s => <td key={s.id}>{s.result.endDate} <span className={s.impact.days > 0 ? 'impact-positive' : ''}>{s.impact.days !== 0 && `(${s.impact.days > 0 ? '+':''}${s.impact.days}d)`}</span></td>)}
+                            </tr>
+                             <tr>
+                                <td>Budget</td>
+                                <td>{currencyFormat(baseline.budget)}</td>
+                                <td><ImpactCell value={crResult.budget} base={baseline.budget} /></td>
+                                {scenarioResults.map(s => <td key={s.id}><ImpactCell value={s.result.budget} base={baseline.budget} /></td>)}
+                            </tr>
+                        </tbody>
+                    </table>
+                     <div style={{marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '1rem'}}>
+                        <button className="button" onClick={handleSaveChange}>Save Change</button>
+                        <button className="button button-primary">Submit for Approval</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style={{borderTop: '1px solid var(--border-color)', marginTop: '2rem', paddingTop: '2rem'}}>
+                <h3 className="subsection-title">Change Deployment</h3>
+                <div className="form-group">
+                    <label htmlFor="deploymentPlan">AI-Generated Deployment Plan</label>
+                    <textarea 
+                        id="deploymentPlan"
+                        rows={12}
+                        value={isGeneratingPlan ? 'Generating plan...' : deploymentPlan}
+                        onChange={(e) => setDeploymentPlan(e.target.value)}
+                        placeholder="Click 'Generate Deployment Plan' to create a step-by-step plan to implement this change."
+                        readOnly={isGeneratingPlan}
+                    />
+                </div>
+                {error && <p className="status-message error">{error}</p>}
+                <div style={{display: 'flex', gap: '1rem'}}>
+                    <button className="button" onClick={handleGeneratePlan} disabled={isGeneratingPlan}>
+                        {isGeneratingPlan ? 'Generating...' : (deploymentPlan ? 'Regenerate Plan' : 'Generate Deployment Plan')}
+                    </button>
+                    <button className="button button-primary" onClick={() => setIsDeploying(true)} disabled={!deploymentPlan || isGeneratingPlan}>
+                        Deploy Change...
+                    </button>
+                </div>
+            </div>
+
+            <ChangeDeploymentModal
+                isOpen={isDeploying}
+                onClose={() => setIsDeploying(false)}
+                deploymentPlan={deploymentPlan}
+                project={project}
+                onUpdateProject={onUpdateProject}
+            />
+        </div>
+    );
+};
