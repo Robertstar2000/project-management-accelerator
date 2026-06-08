@@ -4,6 +4,7 @@ export interface User {
     email: string;
     password?: string;
     geminiKey?: string;
+    tier?: string;
     notificationPrefs?: {
         teams: boolean;
         slack: boolean;

@@ -1,4 +1,4 @@
-# Project Management Accelerator
+# MIFECO PM Accelerator
 
 An AI-powered project management companion that guides you through the full lifecycle of a project using the proven **Hyper-Agile Management Process (HMAP)**. This tool automates documentation, accelerates planning, and provides clear visibility into project execution for individuals and teams.
 
@@ -100,7 +100,7 @@ This tool is built on the **Hyper-Agile Management Process (HMAP)**, a methodolo
 
 **How AI Accelerates HMAP:**
 
-The Project Management Accelerator uses AI as a powerful co-pilot to supercharge the HMAP workflow.
+The MIFECO PM Accelerator uses AI as a powerful co-pilot to supercharge the HMAP workflow.
 
 -   **Eliminates "Blank Page" Problem**: Instead of spending hours writing a Concept Proposal or SOW, the AI generates a comprehensive, context-aware draft in seconds (Phase 1, 5). These drafts are written using professional, industry-standard terminology, allowing project managers to shift their focus from writing to strategy and refinement.
 -   **Ensures Consistency**: The AI uses the outputs of previous phases as context for the next, ensuring a consistent thread of logic flows through the entire plan, from high-level concept to detailed task lists.

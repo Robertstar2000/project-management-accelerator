@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { Project, User } from '../types';
 import { updateGeminiKey } from '../utils/authService';
 import { RainbowText } from '../components/RainbowText';
+import { isPro } from '../lib/tiers';
+import { PricingModal } from '../components/PricingModal';
 
 interface LandingPageProps {
     onSelectProject: (project: Project | null) => void;
@@ -15,6 +17,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
     const [geminiKey, setGeminiKey] = useState('');
     const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
     const [isSavingKey, setIsSavingKey] = useState(false);
+    const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
 
     useEffect(() => {
         // First try to get it from the user object (backend truth)
@@ -61,7 +64,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                 <p style={{ color: 'var(--secondary-text)', fontSize: '1.2rem', letterSpacing: '1px' }}>
                     <RainbowText text="MIFECO" /> MISSION CONTROL
                 </p>
-            </div>
+                {!isPro(currentUser.tier) && (
+                    <div style={{ marginTop: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span style={{
+                            padding: '3px 12px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700,
+                            letterSpacing: '1px', background: 'rgba(0,242,255,0.1)',
+                            border: '1px solid rgba(0,242,255,0.2)', color: '#00f2ff',
+                        }}>
+                            FREE PLAN
+                        </span>
+                        <button
+                            onClick={() => setIsPricingModalOpen(true)}
+                            style={{
+                                background: 'none', border: 'none', color: '#00ffaa',
+                                cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600,
+                                textDecoration: 'underline', padding: 0,
+                            }}
+                        >
+                            Upgrade to Pro →
+                        </button>
+                    </div>
+                )}
 
             <div style={{ 
                 display: 'grid', 
@@ -195,6 +218,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                 <span>|</span>
                 <span>SYSTEM ONLINE</span>
             </div>
+
+            <PricingModal
+                isOpen={isPricingModalOpen}
+                onClose={() => setIsPricingModalOpen(false)}
+                currentTier={(currentUser.tier as 'free' | 'pro') || 'free'}
+            />
         </div>
     );
 };

@@ -7,9 +7,17 @@ import bcrypt from "bcrypt";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(cors());
+  app.use(cors({
+  origin: [
+    'https://mifeco.com',
+    'https://www.mifeco.com',
+    'http://localhost:3002',
+    'http://localhost:5173',
+  ],
+  credentials: true,
+}));
   app.use(express.json({ limit: "50mb" }));
 
   // Setup SQLite
@@ -39,7 +47,136 @@ async function startServer() {
     // Ignore error if column already exists
   }
 
-  // Auth Routes
+  // Add tier / billing columns to users table
+  const userColumns = [
+    `tier TEXT DEFAULT 'free'`,
+    `stripeCustomerId TEXT`,
+    `subscriptionStatus TEXT`,
+    `subscriptionEndsAt TEXT`,
+  ];
+  for (const col of userColumns) {
+    try {
+      await db.exec(`ALTER TABLE users ADD COLUMN ${col};`);
+    } catch (e: any) {
+      // Ignore error if column already exists
+    }
+  }
+
+  // Stripe webhook secret (set via env in production)
+  const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? 'whsec_placeholder';
+
+  // ─── Health endpoint ───────────────────────────────────────────
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', product: 'mifeco-pm-accelerator', tier: 'free|pro' });
+  });
+
+  // ─── User tier endpoint ───────────────────────────────────────
+  app.get('/api/user/tier', async (req, res) => {
+    const { userId } = req.query;
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({ error: 'Missing userId' });
+    }
+    try {
+      const user = await db.get(
+        'SELECT id, username, email, tier, subscriptionStatus, subscriptionEndsAt FROM users WHERE id = ?',
+        [userId],
+      );
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json(user);
+    } catch (error) {
+      console.error('Failed to fetch user tier:', error);
+      res.status(500).json({ error: 'Failed to fetch user tier' });
+    }
+  });
+
+  // ─── Stripe webhook endpoint ──────────────────────────────────
+  // NOTE: In production, verify the Stripe-Signature header:
+  //   import Stripe from 'stripe';
+  //   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  //   const sig = req.headers['stripe-signature'] as string;
+  //   const event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
+  app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+    const event = req.body;
+
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const customerId = event.data?.object?.customer;
+        const clientRefId = event.data?.object?.client_reference_id;
+        if (clientRefId) {
+          try {
+            await db.run(
+              "UPDATE users SET tier = 'pro', stripeCustomerId = ?, subscriptionStatus = 'active' WHERE id = ?",
+              [customerId, clientRefId],
+            );
+            console.log(`[Stripe] Upgraded user ${clientRefId} to pro`);
+          } catch (err) {
+            console.error('[Stripe] Failed to upgrade user:', err);
+          }
+        }
+        break;
+      }
+
+      case 'customer.subscription.updated': {
+        const customerId = event.data?.object?.customer;
+        const status = event.data?.object?.status;
+        const currentPeriodEnd = event.data?.object?.current_period_end;
+        if (customerId) {
+          try {
+            const endsAt = currentPeriodEnd
+              ? new Date(currentPeriodEnd * 1000).toISOString()
+              : null;
+            await db.run(
+              'UPDATE users SET subscriptionStatus = ?, subscriptionEndsAt = ? WHERE stripeCustomerId = ?',
+              [status, endsAt, customerId],
+            );
+            console.log(`[Stripe] Updated subscription for ${customerId}: ${status}`);
+          } catch (err) {
+            console.error('[Stripe] Failed to update subscription:', err);
+          }
+        }
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        const customerId = event.data?.object?.customer;
+        if (customerId) {
+          try {
+            await db.run(
+              "UPDATE users SET tier = 'free', subscriptionStatus = 'canceled' WHERE stripeCustomerId = ?",
+              [customerId],
+            );
+            console.log(`[Stripe] Downgraded user ${customerId} to free`);
+          } catch (err) {
+            console.error('[Stripe] Failed to downgrade user:', err);
+          }
+        }
+        break;
+      }
+
+      case 'invoice.payment_failed': {
+        const customerId = event.data?.object?.customer;
+        if (customerId) {
+          try {
+            await db.run(
+              "UPDATE users SET subscriptionStatus = 'past_due' WHERE stripeCustomerId = ?",
+              [customerId],
+            );
+            console.log(`[Stripe] Payment failed for ${customerId}`);
+          } catch (err) {
+            console.error('[Stripe] Failed to mark past_due:', err);
+          }
+        }
+        break;
+      }
+
+      default:
+        console.log(`[Stripe] Unhandled event type: ${event.type}`);
+    }
+
+    res.status(200).json({ received: true });
+  });
   app.post("/api/auth/signup", async (req, res) => {
     const { username, email, password, geminiKey } = req.body;
     if (!username || !email || !password) {
@@ -52,7 +189,7 @@ async function startServer() {
         "INSERT INTO users (id, username, email, password, geminiKey) VALUES (?, ?, ?, ?, ?)",
         [id, username, email, hashedPassword, geminiKey || null]
       );
-      res.json({ id, username, email, geminiKey: geminiKey || null, notificationPrefs: {} });
+      res.json({ id, username, email, geminiKey: geminiKey || null, tier: 'free', notificationPrefs: {} });
     } catch (error: any) {
       if (error.message.includes("UNIQUE constraint failed")) {
         return res.status(409).json({ error: "Email already exists" });
@@ -75,7 +212,7 @@ async function startServer() {
       
       if (user && await bcrypt.compare(password, user.hashedPassword)) {
         const { hashedPassword, ...userWithoutPassword } = user;
-        res.json({ ...userWithoutPassword, notificationPrefs: {} });
+        res.json({ ...userWithoutPassword, tier: user.tier || 'free', notificationPrefs: {} });
       } else {
         res.status(401).json({ error: "Invalid credentials" });
       }
