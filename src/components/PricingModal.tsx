@@ -172,7 +172,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose, cur
         ) : (
           <div style={{ textAlign: 'center' }}>
             <div style={{ padding: '14px 48px', fontSize: '1.1rem', fontWeight: 700, borderRadius: '8px', background: 'rgba(0,255,170,0.1)', border: '1px solid rgba(0,255,170,0.3)', color: '#00ffaa', display: 'inline-block' }}>
-              ★ You're on Pro
+              ★ You&apos;re on Pro
             </div>
           </div>
         )}

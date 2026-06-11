@@ -103,7 +103,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         if (project.id !== projectDataRef.current.id) {
             setProjectData(project);
         }
-    }, [project.id]);
+    }, [project, project.id]);
 
     const projectPhases = useMemo(() => {
         return [...projectData.documents]
