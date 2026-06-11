@@ -85,6 +85,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                         </button>
                     </div>
                 )}
+            </div>
 
             <div style={{ 
                 display: 'grid', 
