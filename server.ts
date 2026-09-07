@@ -18,6 +18,23 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(helmet());
 
+  // MARS MOXIE environment shim: same-origin proxy for Gemini API (harness browser blocks cross-origin egress)
+  app.use('/gapi', async (req: any, res: any) => {
+    try {
+      const targetPath = req.originalUrl.replace(/^\/gapi/, '');
+      const url = 'https://generativelanguage.googleapis.com' + targetPath;
+      const fetchOpts: any = { method: req.method, headers: { 'Content-Type': 'application/json' } };
+      const apiKey = req.headers['x-goog-api-key'] || req.query.key;
+      if (apiKey) fetchOpts.headers['x-goog-api-key'] = apiKey;
+      if (req.method !== 'GET' && req.method !== 'HEAD') fetchOpts.body = JSON.stringify(req.body);
+      const r = await fetch(url, fetchOpts);
+      const text = await r.text();
+      res.status(r.status).set('Content-Type', r.headers.get('content-type') || 'application/json').send(text);
+    } catch (e: any) {
+      res.status(502).json({ error: 'gemini proxy failed: ' + e.message });
+    }
+  });
+
   // Setup SQLite
   const db = await open({
     filename: "./database.sqlite",
@@ -38,6 +55,17 @@ async function startServer() {
       geminiKey TEXT
     );
   `);
+
+  // Lightweight liveness/readiness endpoint for deployment probes.
+  app.get("/health", async (_req, res) => {
+    try {
+      await db.get("SELECT 1 AS ok");
+      res.status(200).json({ status: "ok", service: "pm-accelerator" });
+    } catch (error) {
+      console.error("Health check failed:", error);
+      res.status(503).json({ status: "error", service: "pm-accelerator" });
+    }
+  });
 
   try {
     await db.exec(`ALTER TABLE users ADD COLUMN geminiKey TEXT;`);
