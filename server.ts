@@ -6,6 +6,7 @@ import { open } from "sqlite";
 import cors from "cors";
 import bcrypt from "bcrypt";
 import path from "path";
+import fs from "fs/promises";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,7 +19,27 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(helmet());
 
-  // MARS MOXIE environment shim: same-origin proxy for Gemini API (harness browser blocks cross-origin egress)
+  app.post("/api/artifacts", async (req, res) => {
+    try {
+      const { app: appName, projectId, source, prompt, timestamp, generator, model, data, mimeType, structuredData } = req.body || {};
+      if (appName !== "Project Accelerator" || !projectId || !source || !prompt || !data || generator !== "Designer/Gemini") return res.status(400).json({ error: "Invalid artifact payload" });
+      const safeProjectId = String(projectId).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeSource = String(source).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const dir = path.join(__dirname, "artifacts", safeProjectId);
+      await fs.mkdir(dir, { recursive: true });
+      const imagePath = path.join(dir, `${Date.now()}-${safeSource}.png`);
+      const tempPath = `${imagePath}.tmp`;
+      await fs.writeFile(tempPath, Buffer.from(String(data).replace(/^data:image\/[^;]+;base64,/, ""), "base64"));
+      await fs.rename(tempPath, imagePath);
+      const provenance = { app: appName, projectId: safeProjectId, source, prompt, timestamp: timestamp || new Date().toISOString(), generator, model, mimeType: mimeType || "image/png", path: imagePath, structuredData };
+      await fs.writeFile(`${imagePath}.provenance.json`, JSON.stringify(provenance, null, 2));
+      res.status(201).json(provenance);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Gemini same-origin proxy for restricted browser environments
   app.use('/gapi', async (req: any, res: any) => {
     try {
       const targetPath = req.originalUrl.replace(/^\/gapi/, '');
