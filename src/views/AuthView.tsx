@@ -123,68 +123,77 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     return (
         <div className="flex flex-col md:flex-row min-h-screen w-full bg-slate-950 text-white overflow-hidden">
             {/* Left Side - Hero Section (Landing Page Blocks) */}
-            <div className="md:w-1/2 p-12 md:p-24 flex flex-col justify-center bg-slate-900 border-r border-slate-800 relative">
+            <div className="md:w-1/2 p-10 md:p-24 flex flex-col justify-center relative overflow-hidden" style={{ background: 'linear-gradient(150deg, rgba(139,92,246,0.16) 0%, rgba(245,158,11,0.08) 45%, rgba(2,6,23,0) 80%)' }}>
                 <div className="max-w-xl relative z-10">
-                    <div className="mb-16">
-                        <h1 className="text-6xl md:text-8xl font-black tracking-tighter mb-4 leading-none">
+                    <div className="mb-12">
+                        <div className="d-inline-flex align-items-center gap-2 px-3 py-1 mb-5 rounded-full" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.9rem', borderRadius: '999px', border: '1px solid rgba(139,92,246,0.45)', background: 'rgba(139,92,246,0.10)', fontSize: '11px', letterSpacing: '0.22em', fontWeight: 700, color: '#c4b5fd' }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
+                            MIFECO DELIVERY ENGINE
+                        </div>
+                        <h1 className="font-black tracking-tighter mb-4 leading-tight" style={{ fontSize: 'clamp(2.6rem, 5vw, 4.6rem)' }}>
                             <RainbowText text="MIFECO" />
+                            <span className="block text-white" style={{ fontSize: '0.45em', letterSpacing: '-0.02em', marginTop: '0.4em', background: 'linear-gradient(90deg,#c4b5fd,#fbbf24)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>From signed deal to started work, in minutes</span>
                         </h1>
-                        <p className="text-slate-500 tracking-[0.3em] uppercase text-xs font-bold opacity-80">Project Acceleration Protocol</p>
+                        <p className="text-slate-400 text-base leading-relaxed" style={{ maxWidth: '520px' }}>
+                            Project Accelerator is the execution engine behind project management: it turns a rough idea or one-line brief into proposals, resource plans, schedules, and live tracking — so your team starts billable work sooner.
+                        </p>
                     </div>
 
-                    <div className="space-y-10">
-                        <div className="flex gap-8 items-start group">
-                            <div className="text-cyan-500 font-mono text-xl pt-1">01</div>
-                            <div>
-                                <h3 className="text-white text-2xl font-bold mb-3 tracking-tight">Project Initialization</h3>
-                                <p className="text-slate-400 text-base leading-relaxed max-w-md">Rapidly generate comprehensive project structures, including milestones, tasks, and resource requirements using AI.</p>
+                    <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+                        {[
+                            { n: '01', c: '#22d3ee', t: 'Project Initialization', d: 'Rapidly generate comprehensive project structures, including milestones, tasks, and resource requirements using AI.' },
+                            { n: '02', c: '#34d399', t: 'Intelligent Planning', d: 'Leverage specialized AI agents to create detailed milestone charts, resource lists, and Kanban boards.' },
+                            { n: '03', c: '#fbbf24', t: 'Automated Documentation', d: 'Automatically generate and refine project documents, specifications, and constraints with AI assistance.' },
+                            { n: '04', c: '#f472b6', t: 'Real-time Tracking', d: 'Monitor project progress, workload distribution, and task completion through interactive dashboards.' },
+                            { n: '05', c: '#f87171', t: 'Secure Collaboration', d: 'Maintain project integrity with encrypted connections and secure access controls for your entire team.' },
+                        ].map((f) => (
+                            <div key={f.n} className="p-5 rounded-2xl transition-all hover:-translate-y-1" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(10px)' }}>
+                                <div className="font-mono text-lg font-bold mb-2" style={{ color: f.c }}>{f.n}</div>
+                                <h3 className="text-white text-base font-bold mb-2 tracking-tight">{f.t}</h3>
+                                <p className="text-slate-400 text-sm leading-relaxed mb-0">{f.d}</p>
                             </div>
-                        </div>
-                        
-                        <div className="flex gap-8 items-start group">
-                            <div className="text-emerald-500 font-mono text-xl pt-1">02</div>
-                            <div>
-                                <h3 className="text-white text-2xl font-bold mb-3 tracking-tight">Intelligent Planning</h3>
-                                <p className="text-slate-400 text-base leading-relaxed max-w-md">Leverage specialized AI agents to create detailed milestone charts, resource lists, and Kanban boards.</p>
-                            </div>
-                        </div>
+                        ))}
+                    </div>
 
-                        <div className="flex gap-8 items-start group">
-                            <div className="text-amber-500 font-mono text-xl pt-1">03</div>
-                            <div>
-                                <h3 className="text-white text-2xl font-bold mb-3 tracking-tight">Automated Documentation</h3>
-                                <p className="text-slate-400 text-base leading-relaxed max-w-md">Automatically generate and refine project documents, specifications, and constraints with AI assistance.</p>
+                    <div className="flex flex-wrap gap-3 mt-6">
+                        {[
+                            { i: '⚡', l: 'Proposals in minutes, not days' },
+                            { i: '🛡️', l: 'You review every output' },
+                            { i: '🔑', l: 'Bring your own AI key' },
+                        ].map((b) => (
+                            <div key={b.l} className="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-xl" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.5rem 0.8rem', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(2,6,23,0.55)', fontSize: '11px', color: '#94a3b8' }}>
+                                <span>{b.i}</span> {b.l}
                             </div>
-                        </div>
-
-                        <div className="flex gap-8 items-start group">
-                            <div className="text-pink-500 font-mono text-xl pt-1">04</div>
-                            <div>
-                                <h3 className="text-white text-2xl font-bold mb-3 tracking-tight">Real-time Tracking</h3>
-                                <p className="text-slate-400 text-base leading-relaxed max-w-md">Monitor project progress, workload distribution, and task completion through interactive dashboards.</p>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-8 items-start group">
-                            <div className="text-red-500 font-mono text-xl pt-1">05</div>
-                            <div>
-                                <h3 className="text-white text-2xl font-bold mb-3 tracking-tight">Secure Collaboration</h3>
-                                <p className="text-slate-400 text-base leading-relaxed max-w-md">Maintain project integrity with encrypted connections and secure access controls for your entire team.</p>
-                            </div>
-                        </div>
+                        ))}
                     </div>
                 </div>
-                
+
                 {/* Decorative Elements */}
-                <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
-                    <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-cyan-500/20 rounded-full blur-[120px]" />
-                    <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-[120px]" />
+                <div className="absolute top-0 left-0 w-full h-full opacity-25 pointer-events-none">
+                    <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full blur-[130px]" style={{ background: 'rgba(139,92,246,0.25)' }} />
+                    <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] rounded-full blur-[130px]" style={{ background: 'rgba(245,158,11,0.18)' }} />
                 </div>
             </div>
 
             {/* Right Side - Auth Form */}
             <div className="md:w-1/2 flex flex-col justify-center items-center p-8 md:p-20 bg-slate-950 relative">
                 <div className="w-full max-w-md">
+                    {/* Subscribe CTA (TEST mode Payment Link — visible to signed-out visitors; not live) */}
+                    <div style={{ border: '1px solid rgba(139,92,246,0.4)', background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(245,158,11,0.08))', borderRadius: '1.5rem', padding: '1.5rem', marginBottom: '2rem', textAlign: 'center' }}>
+                        <a
+                            href="https://buy.stripe.com/test_bJeaEXbl0gwC7jy7E1dQQ01"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-test="stripe-payment-link-public"
+                            className="button button-primary"
+                            style={{ display: 'inline-block', padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center', background: 'linear-gradient(90deg,#8b5cf6,#f59e0b)', border: 'none', color: '#fff', borderRadius: '0.9rem', fontWeight: 800, boxShadow: '0 12px 30px -12px rgba(139,92,246,0.65)' }}
+                        >
+                            Sign up for a paid subscription — $49/MO
+                        </a>
+                        <span style={{ display: 'block', color: 'var(--secondary-text, #94a3b8)', fontSize: '0.75rem', letterSpacing: '1px', marginTop: '0.6rem' }}>
+                            TEST mode payment link — not live
+                        </span>
+                    </div>
                     <div className="mb-12 text-center md:text-left">
                         <h2 className="text-3xl font-bold text-white mb-2">{activeTab === 'signin' ? 'Welcome Back' : 'Create Account'}</h2>
                         <p className="text-slate-500">Enter your credentials to access the hub</p>
@@ -239,7 +248,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                     className="w-full py-5 rounded-2xl bg-white text-black font-black text-sm uppercase tracking-widest hover:bg-cyan-400 transition-all active:scale-[0.98] disabled:opacity-50" 
                                     disabled={loading}
                                 >
-                                    {loading ? 'AUTHORIZING...' : 'INITIALIZE ACCESS'}
+                                    {loading ? 'AUTHORIZING...' : 'Sign in to use your own key'}
                                 </button>
                             </form>
                         ) : (
@@ -280,6 +289,18 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                 </button>
                             </form>
                         )}
+                        <div className="pt-4 text-center">
+                            <a
+                                href="https://buy.stripe.com/bJe3cw72j5LM5DY5DS7Vm06"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-test="open-source-support-link"
+                                data-buy-button-id="buy_btn_1UEyKaLFWluMTxK7KJNimjix"
+                                className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-cyan-400 transition-colors"
+                            >
+                                Support Open-Source Development (optional)
+                            </a>
+                        </div>
                         
                         <div className="pt-6 border-t border-slate-900 text-center">
                             <button 

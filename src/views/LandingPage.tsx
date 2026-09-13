@@ -63,6 +63,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                 </p>
             </div>
 
+            {/* Subscribe CTA (TEST mode Payment Link only — not live) */}
+            <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                gap: '0.6rem', 
+                padding: '1.5rem 2rem', 
+                borderRadius: 'var(--radius-lg)', 
+                border: '1px solid var(--card-border)', 
+                background: 'rgba(0, 242, 255, 0.03)',
+                width: '100%',
+                maxWidth: '850px'
+            }}>
+                <a
+                    href="https://buy.stripe.com/test_bJeaEXbl0gwC7jy7E1dQQ01"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-test="stripe-payment-link"
+                    className="button button-primary"
+                    style={{ padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center' }}
+                >
+                    Sign up for a paid subscription — $49/MO
+                </a>
+                <span style={{ color: 'var(--secondary-text)', fontSize: '0.75rem', letterSpacing: '1px' }}>
+                    TEST mode payment link — not live
+                </span>
+            </div>
+
             <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', 
@@ -146,6 +174,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                                 width: '100%'
                             }}
                         />
+                        <p style={{ color: 'var(--secondary-text)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>To use your own key</p>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button 
                                 onClick={() => setIsKeyModalOpen(true)}
