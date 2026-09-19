@@ -3,21 +3,21 @@ import { User } from '../types';
 
 const BYPASS_AUTH = false; // Turn off bypass to use real DB
 
+const csrfPost = async (path: string, body: unknown) => {
+    const { csrfToken } = await fetch('/api/auth/csrf', { credentials: 'same-origin' }).then(r => r.json());
+    return fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(body) });
+};
+
 export const register = async (username: string, email: string, password: string, geminiKey?: string): Promise<User | null> => {
     if (BYPASS_AUTH) return null;
     try {
-        const res = await fetch('/api/auth/signup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, email, password, geminiKey })
-        });
+        const res = await csrfPost('/api/auth/signup', { username, email, password, geminiKey });
         if (!res.ok) {
             const data = await res.json();
             throw new Error(data.error || 'Registration failed');
         }
-        const user = await res.json();
-        localStorage.setItem('hmap-current-user', JSON.stringify(user));
-        return user;
+        const data = await res.json();
+        return Object.assign(data.user, { recoveryCodes: data.recoveryCodes });
     } catch (e) {
         console.error(e);
         throw e;
@@ -27,18 +27,13 @@ export const register = async (username: string, email: string, password: string
 export const login = async (email: string, password: string): Promise<User | null> => {
     if (BYPASS_AUTH) return null;
     try {
-        const res = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-        });
+        const res = await csrfPost('/api/auth/login', { email, password });
         if (!res.ok) {
             const data = await res.json();
             throw new Error(data.error || 'Login failed');
         }
-        const user = await res.json();
-        localStorage.setItem('hmap-current-user', JSON.stringify(user));
-        return user;
+        const data = await res.json();
+        return data.user;
     } catch (e) {
         console.error(e);
         throw e;
@@ -46,19 +41,14 @@ export const login = async (email: string, password: string): Promise<User | nul
 };
 
 export const logout = async (): Promise<void> => {
+    await csrfPost('/api/auth/logout', {});
     localStorage.removeItem('hmap-current-user');
 };
 
 export const getCurrentUser = async (): Promise<User | null> => {
-    const userStr = localStorage.getItem('hmap-current-user');
-    if (userStr) {
-        try {
-            return JSON.parse(userStr);
-        } catch (e) {
-            return null;
-        }
-    }
-    return null;
+    const response = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    if (!response.ok) return null;
+    return (await response.json()).user;
 };
 
 export const updateGeminiKey = async (userId: string, geminiKey: string): Promise<void> => {

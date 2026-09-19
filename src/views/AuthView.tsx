@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as authService from '../utils/authService';
 import { User } from '../types';
 import { RainbowText } from '../components/RainbowText';
+import { RecoveryFlow } from '../components/auth/RecoveryFlow';
 
 interface AuthViewProps {
     onLogin: (user: User) => void;
@@ -29,6 +30,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [showRecovery, setShowRecovery] = useState(false);
+    const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+    const [pendingUser, setPendingUser] = useState<User | null>(null);
 
     // Hidden button state
     const [clickCount, setClickCount] = useState(0);
@@ -37,14 +41,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     useEffect(() => {
         const storedEmail = localStorage.getItem('mifeco-saved-email') || '';
         const storedUsername = localStorage.getItem('mifeco-saved-username') || '';
-        const storedPassword = localStorage.getItem('mifeco-saved-password') || '';
+        localStorage.removeItem('mifeco-saved-password');
         const storedInternalKeyFlag = localStorage.getItem('mifeco-use-internal-key') === 'true';
 
         if (storedEmail || storedUsername) {
             setEmailOrUsername(storedEmail || storedUsername);
-        }
-        if (storedPassword) {
-            setPassword(storedPassword);
         }
         setUseInternalKey(storedInternalKeyFlag);
     }, []);
@@ -75,7 +76,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             if (user) {
                 localStorage.setItem('mifeco-saved-email', user.email);
                 localStorage.setItem('mifeco-saved-username', user.username);
-                localStorage.setItem('mifeco-saved-password', password);
                 onLogin(user);
             } else {
                 setError('ACCESS DENIED: Credentials unrecognized.');
@@ -97,10 +97,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             if (newUser) {
                 localStorage.setItem('mifeco-saved-email', signupEmail);
                 localStorage.setItem('mifeco-saved-username', signupUsername);
-                localStorage.setItem('mifeco-saved-password', signupPassword);
-                
-                const user = await authService.login(signupEmail, signupPassword);
-                if (user) onLogin(user);
+                const oneTimeCodes = (newUser as any).recoveryCodes || [];
+                if (oneTimeCodes.length) {
+                    setPendingUser(newUser);
+                    setRecoveryCodes(oneTimeCodes);
+                } else onLogin(newUser);
             } else {
                 setError('INIT_FAILED: Registration protocol rejected.');
             }
@@ -119,6 +120,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         window.location.href = `mailto:mifecoinc@gmail.com?subject=${subject}&body=${body}`;
         setIsWaitlistModalOpen(false);
     };
+
+    if (recoveryCodes.length && pendingUser) return <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6"><section className="max-w-lg w-full border border-amber-400 rounded-2xl p-6"><h1 className="text-xl font-bold">Save your recovery codes</h1><p className="text-slate-300 my-3">Shown once. Store them securely; each code works one time.</p><pre className="bg-black p-4 select-all overflow-auto">{recoveryCodes.join('\n')}</pre><button className="w-full p-3 border rounded-xl my-2" onClick={()=>{const b=new Blob([recoveryCodes.join('\n')+'\n']);const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='pma-recovery-codes.txt';a.click();URL.revokeObjectURL(a.href)}}>Download codes</button><button className="w-full p-3 bg-violet-600 rounded-xl" onClick={()=>onLogin(pendingUser)}>I saved the codes</button></section></main>;
 
     return (
         <div className="flex flex-col md:flex-row min-h-screen w-full bg-slate-950 text-white overflow-hidden">
@@ -215,7 +218,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                     </div>
                     
                     <div className="space-y-8">
-                        {activeTab === 'signin' ? (
+                        {showRecovery ? <RecoveryFlow onClose={() => setShowRecovery(false)} /> : activeTab === 'signin' ? (
                             <form onSubmit={handleLogin} className="space-y-6">
                                 {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-xs font-mono">{error}</div>}
                                 
@@ -250,6 +253,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                 >
                                     {loading ? 'AUTHORIZING...' : 'Sign in to use your own key'}
                                 </button>
+                                <button type="button" onClick={() => setShowRecovery(true)} className="w-full text-cyan-400 text-sm underline">Forgot password?</button>
                             </form>
                         ) : (
                             <form onSubmit={handleSignup} className="space-y-5">
@@ -265,7 +269,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                 </div>
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">Password</label>
-                                    <input type="password" value={signupPassword} onChange={e => setSignupPassword(e.target.value)} required placeholder="••••••••" className="w-full px-5 py-4 rounded-2xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all placeholder:text-slate-700" />
+                                    <input type="password" value={signupPassword} onChange={e => setSignupPassword(e.target.value)} required minLength={12} maxLength={256} placeholder="12 characters minimum" className="w-full px-5 py-4 rounded-2xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all placeholder:text-slate-700" />
                                 </div>
                                 {!useInternalKey && (
                                     <div className="space-y-2">

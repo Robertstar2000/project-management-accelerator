@@ -14,6 +14,7 @@ import { GlobalStyles } from './styles/GlobalStyles';
 import { DEFAULT_SPRINTS, TEMPLATES, DEFAULT_DOCUMENTS } from './constants/projectData';
 import { logAction } from './utils/logging';
 import { AuthView } from './views/AuthView';
+import { RecoveryCodeManager } from './components/auth/RecoveryFlow';
 import * as authService from './utils/authService';
 import { subscribeToUpdates, notifyUpdate } from './utils/syncService';
 import { Project, Task, Notification, User } from './types';
@@ -29,6 +30,7 @@ const App = () => {
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [setupKey, setSetupKey] = useState(0);
@@ -485,6 +487,8 @@ const App = () => {
                         onConfirm={handleConfirmClearAll}
                     />
                 )}
+                <button className="fixed bottom-5 left-5 z-40 bg-slate-800 text-white px-4 py-2 rounded-xl" onClick={() => setIsSecurityOpen(true)}>Account security</button>
+                {isSecurityOpen && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"><div className="bg-slate-900 text-white rounded-2xl p-6 max-w-lg w-full"><RecoveryCodeManager/><button className="mt-4 w-full p-2 border rounded" onClick={() => setIsSecurityOpen(false)}>Close</button></div></div>}
             </>
         )}
         

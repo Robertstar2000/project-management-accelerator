@@ -3,11 +3,11 @@ import helmet from "helmet";
 import { createServer as createViteServer } from "vite";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
-import cors from "cors";
-import bcrypt from "bcrypt";
+
 import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
+import { installSecureAuth, type AuthDb } from "./secureAuth.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,7 +15,7 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000", 10);
 
-  app.use(cors());
+
   app.use(express.json({ limit: "50mb" }));
   app.use(helmet());
 
@@ -58,7 +58,7 @@ async function startServer() {
 
   // Setup SQLite
   const db = await open({
-    filename: "./database.sqlite",
+    filename: process.env.AUTH_DB_PATH || path.join(__dirname, "database.sqlite"),
     driver: sqlite3.Database,
   });
 
@@ -94,51 +94,14 @@ async function startServer() {
     // Ignore error if column already exists
   }
 
-  // Auth Routes
-  app.post("/api/auth/signup", async (req, res) => {
-    const { username, email, password, geminiKey } = req.body;
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-    try {
-      const id = `user-${Date.now()}`;
-      const hashedPassword = await bcrypt.hash(password, 10);
-      await db.run(
-        "INSERT INTO users (id, username, email, password, geminiKey) VALUES (?, ?, ?, ?, ?)",
-        [id, username, email, hashedPassword, geminiKey || null]
-      );
-      res.json({ id, username, email, geminiKey: geminiKey || null, notificationPrefs: {} });
-    } catch (error: any) {
-      if (error.message.includes("UNIQUE constraint failed")) {
-        return res.status(409).json({ error: "Email already exists" });
-      }
-      console.error("Signup error:", error);
-      res.status(500).json({ error: "Failed to create user" });
-    }
-  });
+  const authDb: AuthDb = {
+    exec: (sql) => db.exec(sql),
+    get: (sql, params = []) => db.get(sql, params),
+    all: (sql, params = []) => db.all(sql, params),
+    run: async (sql, params = []) => { const r = await db.run(sql, params); return { changes: r.changes, lastID: r.lastID }; },
+  };
+  await installSecureAuth(app, authDb, 'password');
 
-  app.post("/api/auth/login", async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing email/username or password" });
-    }
-    try {
-      const user = await db.get(
-        "SELECT id, username, email, password as hashedPassword, geminiKey FROM users WHERE email = ? OR username = ?",
-        [email, email]
-      );
-      
-      if (user && await bcrypt.compare(password, user.hashedPassword)) {
-        const { hashedPassword, ...userWithoutPassword } = user;
-        res.json({ ...userWithoutPassword, notificationPrefs: {} });
-      } else {
-        res.status(401).json({ error: "Invalid credentials" });
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).json({ error: "Failed to login" });
-    }
-  });
 
   app.post("/api/users/:id/geminikey", async (req, res) => {
     const { id } = req.params;
