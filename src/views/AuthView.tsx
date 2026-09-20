@@ -183,18 +183,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                 <div className="w-full max-w-md">
                     {/* Subscribe CTA (TEST mode Payment Link — visible to signed-out visitors; not live) */}
                     <div style={{ border: '1px solid rgba(139,92,246,0.4)', background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(245,158,11,0.08))', borderRadius: '1.5rem', padding: '1.5rem', marginBottom: '2rem', textAlign: 'center' }}>
-                        <a
-                            href="https://buy.stripe.com/test_bJeaEXbl0gwC7jy7E1dQQ01"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            data-test="stripe-payment-link-public"
-                            className="button button-primary"
-                            style={{ display: 'inline-block', padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center', background: 'linear-gradient(90deg,#8b5cf6,#f59e0b)', border: 'none', color: '#fff', borderRadius: '0.9rem', fontWeight: 800, boxShadow: '0 12px 30px -12px rgba(139,92,246,0.65)' }}
+                        <span
+                            aria-disabled="true"
+                            data-test="stripe-payment-link-pending"
+                            style={{ display: 'inline-block', padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center', opacity: 0.55, cursor: 'not-allowed', background: 'linear-gradient(90deg,#8b5cf6,#f59e0b)', border: 'none', color: '#fff', borderRadius: '0.9rem', fontWeight: 800 }}
+                            title="Payment link pending Stripe setup"
                         >
-                            Sign up for a paid subscription — $49/MO
-                        </a>
-                        <span style={{ display: 'block', color: 'var(--secondary-text, #94a3b8)', fontSize: '0.75rem', letterSpacing: '1px', marginTop: '0.6rem' }}>
-                            TEST mode payment link — not live
+                            Subscription checkout pending — Contact us ($49/MO)
                         </span>
                     </div>
                     <div className="mb-12 text-center md:text-left">

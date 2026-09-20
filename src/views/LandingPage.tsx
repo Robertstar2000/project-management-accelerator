@@ -77,18 +77,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSelectProject, onNew
                 maxWidth: '850px'
             }}>
                 <a
-                    href="https://buy.stripe.com/test_bJeaEXbl0gwC7jy7E1dQQ01"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-test="stripe-payment-link"
-                    className="button button-primary"
-                    style={{ padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center' }}
+                    href="https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03"
+                    data-test="stripe-payment-link-live"
                 >
-                    Sign up for a paid subscription — $49/MO
+                    Subscribe $49/MO
                 </a>
-                <span style={{ color: 'var(--secondary-text)', fontSize: '0.75rem', letterSpacing: '1px' }}>
-                    TEST mode payment link — not live
-                </span>
             </div>
 
             <div style={{ 
