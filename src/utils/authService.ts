@@ -53,11 +53,7 @@ export const getCurrentUser = async (): Promise<User | null> => {
 
 export const updateGeminiKey = async (userId: string, geminiKey: string): Promise<void> => {
     try {
-        const res = await fetch(`/api/users/${userId}/geminikey`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ geminiKey })
-        });
+        const res = await csrfPost(`/api/users/${userId}/geminikey`, { geminiKey });
         if (!res.ok) {
             throw new Error('Failed to update Gemini key');
         }

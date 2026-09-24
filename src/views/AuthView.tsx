@@ -181,16 +181,20 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             {/* Right Side - Auth Form */}
             <div className="md:w-1/2 flex flex-col justify-center items-center p-8 md:p-20 bg-slate-950 relative">
                 <div className="w-full max-w-md">
-                    {/* Subscribe CTA (TEST mode Payment Link — visible to signed-out visitors; not live) */}
+                    {/* Subscribe CTA — verified live Stripe Checkout */}
                     <div style={{ border: '1px solid rgba(139,92,246,0.4)', background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(245,158,11,0.08))', borderRadius: '1.5rem', padding: '1.5rem', marginBottom: '2rem', textAlign: 'center' }}>
-                        <span
-                            aria-disabled="true"
-                            data-test="stripe-payment-link-pending"
-                            style={{ display: 'inline-block', padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center', opacity: 0.55, cursor: 'not-allowed', background: 'linear-gradient(90deg,#8b5cf6,#f59e0b)', border: 'none', color: '#fff', borderRadius: '0.9rem', fontWeight: 800 }}
-                            title="Payment link pending Stripe setup"
+                        <a
+                            href="https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-test="stripe-payment-link-live"
+                            style={{ display: 'inline-block', padding: '1rem 2.5rem', fontSize: '1.1rem', textAlign: 'center', background: 'linear-gradient(90deg,#8b5cf6,#f59e0b)', border: 'none', color: '#fff', borderRadius: '0.9rem', fontWeight: 800 }}
                         >
-                            Subscription checkout pending — Contact us ($49/MO)
-                        </span>
+                            Subscribe to Project Accelerator — $49/MO
+                        </a>
+                        <div style={{ marginTop: '0.75rem', color: '#94a3b8', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                            Secure live monthly checkout
+                        </div>
                     </div>
                     <div className="mb-12 text-center md:text-left">
                         <h2 className="text-3xl font-bold text-white mb-2">{activeTab === 'signin' ? 'Welcome Back' : 'Create Account'}</h2>

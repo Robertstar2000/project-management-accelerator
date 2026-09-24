@@ -1,15 +1,19 @@
 
 import { Project } from '../types';
 
+const csrfHeaders = async (): Promise<Record<string, string>> => {
+    const { csrfToken } = await fetch('/api/auth/csrf', { credentials: 'same-origin' }).then(r => r.json());
+    return { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken };
+};
+
 // --- Main Exported Functions ---
 
 export const saveProjectsToDB = async (projects: Project[], userId?: string): Promise<void> => {
     try {
         const response = await fetch('/api/projects', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: await csrfHeaders(),
+            credentials: 'same-origin',
             body: JSON.stringify(projects)
         });
         if (!response.ok) {
@@ -24,7 +28,9 @@ export const saveProjectsToDB = async (projects: Project[], userId?: string): Pr
 export const deleteProjectFromDB = async (projectId: string): Promise<void> => {
     try {
         const response = await fetch(`/api/projects/${projectId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: await csrfHeaders(),
+            credentials: 'same-origin'
         });
         if (!response.ok) {
             throw new Error('Failed to delete project from backend');
@@ -39,7 +45,9 @@ export const deleteAllProjectsFromDB = async (userId?: string): Promise<void> =>
     try {
         const url = userId ? `/api/projects?userId=${encodeURIComponent(userId)}` : '/api/projects';
         const response = await fetch(url, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: await csrfHeaders(),
+            credentials: 'same-origin'
         });
         if (!response.ok) {
             throw new Error('Failed to delete all projects from backend');
