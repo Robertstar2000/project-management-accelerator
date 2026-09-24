@@ -7,7 +7,7 @@ import { open } from "sqlite";
 import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
-import { installSecureAuth, type AuthDb } from "./secureAuth.ts";
+import { currentUser, installSecureAuth, type AuthDb } from "./secureAuth.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -87,6 +87,15 @@ async function startServer() {
       res.status(503).json({ status: "error", service: "pm-accelerator" });
     }
   });
+  app.get("/api/health", async (_req, res) => {
+    try {
+      await db.get("SELECT 1 AS ok");
+      res.status(200).json({ status: "ok", service: "pm-accelerator" });
+    } catch (error) {
+      console.error("API health check failed:", error);
+      res.status(503).json({ status: "error", service: "pm-accelerator" });
+    }
+  });
 
   try {
     await db.exec(`ALTER TABLE users ADD COLUMN geminiKey TEXT;`);
@@ -102,10 +111,18 @@ async function startServer() {
   };
   await installSecureAuth(app, authDb, 'password');
 
+  const requireUser = async (req: any, res: any, next: any) => {
+    const user = await currentUser(authDb, req);
+    if (!user) return res.status(401).json({ error: "Authentication required" });
+    req.authUser = user;
+    next();
+  };
 
-  app.post("/api/users/:id/geminikey", async (req, res) => {
+  app.post("/api/users/:id/geminikey", requireUser, async (req, res) => {
     const { id } = req.params;
     const { geminiKey } = req.body;
+    if (String((req as any).authUser.id) !== String(id)) return res.status(403).json({ error: "Forbidden" });
+    if (typeof geminiKey !== "undefined" && (typeof geminiKey !== "string" || geminiKey.length > 500)) return res.status(400).json({ error: "Invalid Gemini key" });
     try {
       await db.run("UPDATE users SET geminiKey = ? WHERE id = ?", [geminiKey, id]);
       res.json({ success: true });
@@ -116,15 +133,10 @@ async function startServer() {
   });
 
   // API Routes
-  app.get("/api/projects", async (req, res) => {
-    const { userId } = req.query;
+  app.get("/api/projects", requireUser, async (req, res) => {
     try {
-      let rows;
-      if (userId) {
-        rows = await db.all("SELECT data FROM projects WHERE ownerId = ?", [userId]);
-      } else {
-        rows = await db.all("SELECT data FROM projects");
-      }
+      const ownerId = String((req as any).authUser.id);
+      const rows = await db.all("SELECT data FROM projects WHERE ownerId = ?", [ownerId]);
       const projects = rows.map((row) => JSON.parse(row.data));
       res.json(projects);
     } catch (error) {
@@ -133,16 +145,19 @@ async function startServer() {
     }
   });
 
-  app.post("/api/projects", async (req, res) => {
+  app.post("/api/projects", requireUser, async (req, res) => {
     try {
       const projects = req.body; // Expecting an array of projects to sync
-      if (!Array.isArray(projects)) {
-        return res.status(400).json({ error: "Expected an array of projects" });
+      if (!Array.isArray(projects) || projects.length > 100) {
+        return res.status(400).json({ error: "Expected an array of up to 100 projects" });
       }
+      const ownerId = String((req as any).authUser.id);
       for (const project of projects) {
+        if (!project || typeof project.id !== "string" || project.id.length > 200) return res.status(400).json({ error: "Invalid project" });
+        const ownedProject = { ...project, ownerId };
         await db.run(
           "INSERT OR REPLACE INTO projects (id, ownerId, data) VALUES (?, ?, ?)",
-          [project.id, project.ownerId, JSON.stringify(project)]
+          [ownedProject.id, ownerId, JSON.stringify(ownedProject)]
         );
       }
       res.json({ success: true });
@@ -152,10 +167,11 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/projects/:id", async (req, res) => {
+  app.delete("/api/projects/:id", requireUser, async (req, res) => {
     const { id } = req.params;
     try {
-      await db.run("DELETE FROM projects WHERE id = ?", [id]);
+      const ownerId = String((req as any).authUser.id);
+      await db.run("DELETE FROM projects WHERE id = ? AND ownerId = ?", [id, ownerId]);
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to delete project:", error);
@@ -163,14 +179,10 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/projects", async (req, res) => {
-    const { userId } = req.query;
+  app.delete("/api/projects", requireUser, async (req, res) => {
     try {
-      if (userId) {
-        await db.run("DELETE FROM projects WHERE ownerId = ?", [userId]);
-      } else {
-        await db.run("DELETE FROM projects");
-      }
+      const ownerId = String((req as any).authUser.id);
+      await db.run("DELETE FROM projects WHERE ownerId = ?", [ownerId]);
       res.json({ success: true });
     } catch (error) {
       console.error("Failed to delete projects:", error);
@@ -197,8 +209,8 @@ async function startServer() {
     app.use(express.static("dist"));
   }
 
-  app.listen(PORT, "127.0.0.1", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
