@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import JSZip from 'jszip';
 import { TeamAssignmentsView } from './TeamView';
-import { Project, Task, User } from '../types';
+import { Project, Task, User, Resource } from '../types';
 import { WorkloadView } from './WorkloadView';
 import { parseResourcesFromMarkdown } from '../utils/be-logic';
 import { ProjectStateDownloadModal } from '../components/ProjectStateDownloadModal';
@@ -165,7 +165,7 @@ const GanttChart = ({ tasks, startDate, endDate }: { tasks: Task[], startDate: s
 // --- EXISTING COMPONENTS ---
 
 const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating }: { project: Project, onUpdateProject: (p: Partial<Project>) => void, onEstimateCosts: () => void, isEstimating: boolean }) => {
-    const [resources, setResources] = useState<Resource[]>(project.resources || []);
+    const resources = project.resources || [];
     const [newResourceName, setNewResourceName] = useState('');
 
     const extractedResources = useMemo(() => {
@@ -174,31 +174,29 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
         return parseResourcesFromMarkdown(project.phasesData[resourceDoc.id].content);
     }, [project.documents, project.phasesData]);
 
-    useEffect(() => {
-        const projectResources = project.resources || [];
-        const currentResourceNames = new Set(projectResources.map(r => r.name));
+    const unimportedCount = useMemo(() => {
+        const currentResourceNames = new Set(resources.map(r => r.name));
+        return extractedResources.filter(name => !currentResourceNames.has(name)).length;
+    }, [extractedResources, resources]);
+
+    const handleImportFromDoc = () => {
+        const currentResourceNames = new Set(resources.map(r => r.name));
         const newResourcesToAdd = extractedResources
             .filter(name => !currentResourceNames.has(name))
             .map(name => ({ 
                 id: crypto.randomUUID(),
                 name, 
-                type: 'human' as const, // Default to human, user can change
+                type: 'human' as const,
                 unitCost: 0, 
                 quantity: 0, 
                 totalCost: 0 
             }));
-        
         if (newResourcesToAdd.length > 0) {
-            const updatedResources = [...projectResources, ...newResourcesToAdd];
-            onUpdateProject({ resources: updatedResources });
+            const updatedResources = [...resources, ...newResourcesToAdd];
+            const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+            onUpdateProject({ resources: updatedResources, budget: totalBudget });
         }
-    }, [extractedResources, project.resources, onUpdateProject]);
-
-    const [prevProjectResources, setPrevProjectResources] = useState(project.resources);
-    if (project.resources !== prevProjectResources) {
-        setPrevProjectResources(project.resources);
-        setResources(project.resources || []);
-    }
+    };
 
     const handleUpdate = (index: number, field: keyof Resource, value: any) => {
         const newResources = [...resources];
@@ -210,13 +208,8 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
         }
 
         newResources[index] = resource;
-        setResources(newResources);
-    };
-
-    const handleBlur = () => {
-        // Calculate total budget
-        const totalBudget = resources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
-        onUpdateProject({ resources, budget: totalBudget });
+        const totalBudget = newResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+        onUpdateProject({ resources: newResources, budget: totalBudget });
     };
 
     const handleAddResource = () => {
@@ -230,21 +223,21 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                 totalCost: 0 
             };
             const updatedResources = [...resources, newRes];
-            setResources(updatedResources);
-            onUpdateProject({ resources: updatedResources });
+            const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+            onUpdateProject({ resources: updatedResources, budget: totalBudget });
             setNewResourceName('');
         }
     };
 
     const handleDeleteResource = (index: number) => {
         const updatedResources = resources.filter((_, i) => i !== index);
-        setResources(updatedResources);
-        onUpdateProject({ resources: updatedResources });
+        const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
+        onUpdateProject({ resources: updatedResources, budget: totalBudget });
     };
 
     return (
         <div className="glass-card" style={{ padding: '2rem', borderLeft: 'none' }}>
-            <div style={{marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'center'}}>
+            <div style={{marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'}}>
                 <input 
                     type="text" 
                     placeholder="Add new resource..." 
@@ -262,6 +255,11 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                     onKeyDown={(e) => e.key === 'Enter' && handleAddResource()}
                 />
                 <button className="button button-primary" onClick={handleAddResource} style={{whiteSpace: 'nowrap'}}>Add Resource</button>
+                {unimportedCount > 0 && (
+                    <button className="button button-secondary" onClick={handleImportFromDoc} style={{whiteSpace: 'nowrap'}}>
+                        Sync from Phase 2 ({unimportedCount} new)
+                    </button>
+                )}
                 <button 
                     className="button button-secondary" 
                     onClick={onEstimateCosts} 
@@ -294,13 +292,12 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                         {resources.map((r, i) => (
                             <tr key={r.id || i} style={{background: 'rgba(255,255,255,0.02)', transition: 'background 0.2s'}}>
                                 <td style={{padding: '0.5rem 1rem', borderRadius: '8px 0 0 8px'}}>
-                                    <input type="text" value={r.name} onChange={e => handleUpdate(i, 'name', e.target.value)} onBlur={handleBlur} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--primary-text)', fontWeight: 500 }} />
+                                    <input type="text" value={r.name} onChange={e => handleUpdate(i, 'name', e.target.value)} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--primary-text)', fontWeight: 500 }} />
                                 </td>
                                 <td style={{padding: '0.5rem 1rem'}}>
                                     <select 
                                         value={r.type} 
                                         onChange={e => handleUpdate(i, 'type', e.target.value)} 
-                                        onBlur={handleBlur}
                                         style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--secondary-text)' }}
                                     >
                                         <option value="human">Human (Labor)</option>
@@ -308,10 +305,10 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                                     </select>
                                 </td>
                                 <td style={{padding: '0.5rem 1rem'}}>
-                                    <input type="number" value={r.unitCost} onChange={e => handleUpdate(i, 'unitCost', parseFloat(e.target.value))} onBlur={handleBlur} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--secondary-text)' }} />
+                                    <input type="number" value={r.unitCost} onChange={e => handleUpdate(i, 'unitCost', parseFloat(e.target.value))} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--secondary-text)' }} />
                                 </td>
                                 <td style={{padding: '0.5rem 1rem'}}>
-                                    <input type="number" value={r.quantity} onChange={e => handleUpdate(i, 'quantity', parseFloat(e.target.value))} onBlur={handleBlur} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--secondary-text)' }} />
+                                    <input type="number" value={r.quantity} onChange={e => handleUpdate(i, 'quantity', parseFloat(e.target.value))} style={{ width: '100%', background: 'transparent', border: 'none', padding: '0.5rem', color: 'var(--secondary-text)' }} />
                                 </td>
                                 <td style={{padding: '0.5rem 1rem', fontWeight: 'bold', color: 'var(--success-color)'}}>
                                     ${(r.totalCost || 0).toLocaleString()}
@@ -466,7 +463,15 @@ export const ProjectTrackingView: React.FC<{
         localStorage.setItem(`hmap-tracking-view-${project.id}`, view);
     };
 
-    const viewOrder = ['Timeline', 'Task List', 'Kanban Board', 'Workload', 'Milestones', 'Team', 'Resources'];
+    const viewTabs = [
+        { id: 'Timeline', label: 'Timeline' },
+        { id: 'Task List', label: `Task List (${project.tasks?.length || 0})` },
+        { id: 'Kanban Board', label: 'Kanban Board' },
+        { id: 'Workload', label: 'Workload' },
+        { id: 'Milestones', label: `Milestones (${project.milestones?.length || 0})` },
+        { id: 'Team', label: `Team (${project.team?.length || 0})` },
+        { id: 'Resources', label: `Resources (${project.resources?.length || 0})` }
+    ];
 
     const handleDragStart = (e: React.DragEvent, taskId: string) => {
         e.dataTransfer.setData('taskId', taskId);
@@ -489,10 +494,12 @@ export const ProjectTrackingView: React.FC<{
 
     return (
         <div>
-            <div className="dashboard-nav" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {viewOrder.map(v => (
-                        <button key={v} onClick={() => handleViewChange(v)} className={trackingView === v ? 'active' : ''}>{v}</button>
+            <div className="dashboard-nav" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {viewTabs.map(tab => (
+                        <button key={tab.id} onClick={() => handleViewChange(tab.id)} className={trackingView === tab.id ? 'active' : ''}>
+                            {tab.label}
+                        </button>
                     ))}
                 </div>
                 <button 
@@ -509,6 +516,33 @@ export const ProjectTrackingView: React.FC<{
                     <GanttChart tasks={project.tasks} startDate={project.startDate} endDate={project.endDate} />
                 )}
                 {trackingView === 'Task List' && <TaskListView tasks={project.tasks} team={project.team} onTaskClick={onTaskClick} />}
+                {trackingView === 'Milestones' && (
+                    <div className="glass-card" style={{ padding: '2rem', borderLeft: 'none' }}>
+                        <h3 className="subsection-title">Project Milestones ({project.milestones?.length || 0})</h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.25rem', marginTop: '1rem' }}>
+                            {(project.milestones || []).map((m, idx) => (
+                                <div key={m.id || idx} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '1.25rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                                        <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>{m.name}</h4>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: m.status === 'Completed' ? 'rgba(52, 211, 153, 0.2)' : 'rgba(129, 140, 248, 0.2)', color: m.status === 'Completed' ? 'var(--success-color)' : 'var(--accent-color)' }}>
+                                            {m.status || 'Pending'}
+                                        </span>
+                                    </div>
+                                    <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)', margin: '0.5rem 0 1rem' }}>{m.description || 'Target delivery milestone.'}</p>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--tertiary-text)', display: 'flex', justifyContent: 'space-between' }}>
+                                        <span>Target: <strong>{m.dueDate || 'TBD'}</strong></span>
+                                        <span>Tasks: <strong>{project.tasks?.filter(t => t.milestoneId === m.id).length || 0}</strong></span>
+                                    </div>
+                                </div>
+                            ))}
+                            {(!project.milestones || project.milestones.length === 0) && (
+                                <p style={{ gridColumn: '1 / -1', textAlign: 'center', opacity: 0.6, padding: '3rem' }}>
+                                    No milestones generated yet. Run Agentic Planning from the dashboard to synthesize milestones.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
                 {trackingView === 'Resources' && <ResourcesView project={project} onUpdateProject={onUpdateProject} onEstimateCosts={onEstimateCosts} isEstimating={isEstimating} />}
                 {trackingView === 'Team' && <div className="glass-card" style={{ padding: '3rem', borderLeft: 'none' }}><TeamAssignmentsView project={project} onUpdateTeam={onUpdateTeam} currentUser={currentUser} /></div>}
                 {trackingView === 'Workload' && <div className="glass-card" style={{ borderLeft: 'none' }}><WorkloadView project={project} /></div>}

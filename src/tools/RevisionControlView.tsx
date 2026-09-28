@@ -162,18 +162,23 @@ ${cr.reason}
 | Budget   | ${currencyFormat(baseline.budget)} | ${currencyFormat(crResult.budget)} | ${scenarioResults.map(s => currencyFormat(s.result.budget)).join(' | ')} |
 `;
 
-        const newDoc = {
+        const newDoc: any = {
             id: `doc-cr-${Date.now()}`,
             title: `Change Request: ${cr.title}`,
             version: 'v1.0',
             status: 'Working',
-            owner: 'A. User',
+            owner: project.ownerId || 'Project Owner',
             phase: 8, // Associate with Sprint/Critical Design Planning
-            content: changeDocContent.trim(),
+            sequence: (documents.length || 0) + 1,
+            type: 'text'
         };
 
         const updatedDocuments = [...documents, newDoc];
-        onUpdateProject({ documents: updatedDocuments });
+        const updatedPhasesData = {
+            ...(project.phasesData || {}),
+            [newDoc.id]: { content: changeDocContent.trim() }
+        };
+        onUpdateProject({ documents: updatedDocuments, phasesData: updatedPhasesData });
 
         logAction('Save Change Request as Document', name, { document: newDoc });
         alert(`Document "${newDoc.title}" has been created and added to the Documents Center for approval.`);

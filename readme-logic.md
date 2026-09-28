@@ -1,119 +1,108 @@
-# Application Logic Outline
+# Technical Architecture & Application Logic Outline
 
-This document outlines the core logic, data flow, and architecture of the Project Management Accelerator application. It also includes a roadmap for potential future improvements.
-
----
-
-### 1. Initialization & State Management
-
--   **Application Mount (`App.tsx`)**
-    -   A primary `useEffect` hook initializes the application upon loading.
-    -   **Authentication (`authService.ts`)**: The application is user-aware. It checks `localStorage` for an active user session (`hmap-session`). If none exists, it renders the `AuthView`, blocking access. The `authService` handles user registration and login, persisting user data in `localStorage` (`hmap-users`) and creating a default user on the very first run.
-    -   **State Loading**: Once a user is authenticated, the app loads all projects (`hmap-projects`) from `localStorage`. A `useMemo` hook filters this list to show only projects owned by or shared with the current user.
-    -   **Session Resumption**: The ID of the last selected project (`hmap-selected-project-id`) is loaded to restore the user's session, automatically opening the last project they were working on.
-    -   **AI Client Initialization**: The Gemini API key is initialized in a specific order of priority: 1) A user-provided key from `localStorage` (`hmap-gemini-key`), 2) A promotional key from environment variables (`process.env.API_KEY`). If no key is found, AI-dependent features are disabled.
-    -   **Cross-Tab Syncing (`syncService.ts`)**: A `BroadcastChannel` is established to ensure state consistency across multiple browser tabs for the same user. When a change is made in one tab (e.g., updating a project), a message is broadcast, prompting other tabs to reload their state from `localStorage`.
+This document details the underlying software architecture, data flow, API endpoints, and AI optimization systems implemented within MIFECO Hub.
 
 ---
 
-### 2. Project Lifecycle & Data Persistence
+## 💾 1. Backend & Database Architecture
 
--   **Project Creation (`NewProjectModal.tsx`)**
-    -   New projects are assigned an `ownerId` corresponding to the logged-in user. The owner is also added as the first member of the project's `team`.
-    -   The creation logic enforces HMAP standards by ensuring mandatory documents (SOW, Resources List, etc.) are always included. It also dynamically adds documents like an RFP and Contract if the "subcontracted" scope is chosen.
--   **State Persistence (`App.tsx`)**
-    -   The application uses a "top-down" state management approach. The primary state (the array of all projects) lives in the `App` component.
-    -   The `saveProjectsToStorage` function is the single point of truth for writing to `localStorage`. Any component that needs to update the global state does so via prop-drilled functions (`saveProject`, `handleSave`, etc.) that ultimately call this function.
-    -   After saving, `notifyUpdate()` is called to trigger the `BroadcastChannel` for tab synchronization.
+MIFECO Hub is configured as a full-stack Node.js + Express application using a local, file-based SQL database for performance, persistence, and simple offline/containerized operations.
 
----
+### A. Database Schema (`database.sqlite`)
+The system initializes an SQLite database with two highly indexed tables:
 
-### 3. Core HMAP Workflow
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT,
+  email TEXT UNIQUE,
+  password TEXT, -- Hashed with bcrypt
+  geminiKey TEXT  -- User-specific encryption key or API key
+);
 
-This is the central planning process, primarily managed by `ProjectDashboard.tsx` and `ProjectPhasesView.tsx`.
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  ownerId TEXT,
+  data TEXT -- Complete JSON serialized project schema (tasks, documents, milestones)
+);
+```
 
--   **Sequential Locking (`getLockStatus` in `ProjectPhasesView.tsx`)**
-    -   This function is the gatekeeper of the HMAP process. It ensures a document is **unlocked** only if the single document *immediately preceding it* in the chronologically sorted list has its status set to "Approved". This strictly enforces the sequential methodology.
--   **Manual Workflow**
-    -   The user opens an unlocked `PhaseCard`, provides input, uses the AI to generate content, edits the result, and marks it "Approved". This action updates the document's status, which in turn unlocks the next document in the sequence.
--   **Automatic Workflow (`runAutomaticGeneration` in `ProjectDashboard.tsx`)**
-    -   This is an `async` `for...of` loop that iterates through the sorted documents.
-    -   **Context Integrity**: To ensure each step has the correct context, the loop uses a local, in-memory copy of the project state (`projectForLoop`). After each document is successfully generated, it updates both the main application state (via `handleSave`) for UI reactivity and its own local copy. This guarantees the *next* document in the loop receives the most up-to-date context from the one just created.
-    -   **Rate Limiting**: A three-second delay is intentionally introduced between each document generation to prevent API rate-limiting errors (HTTP 429), which is crucial for free-tier keys.
-
----
-
-### 4. AI Generation Engine
-
-The AI logic in `ProjectDashboard.tsx` is designed for resilience, quality, and performance.
-
--   **Resilient API Calls (`withRetry`)**
-    -   All Gemini API calls are wrapped in a `withRetry` helper function. It automatically retries a failed API call up to two times with exponential backoff, gracefully handling transient network issues or temporary server-side errors (e.g., HTTP 500).
--   **Optimized Context Gathering (`getRelevantContext`)**
-    -   To generate high-quality outputs while respecting token limits, the context for the AI is built with a clear priority:
-        1.  **Foundational Context (Highest Priority):** The compacted content of the project's **first document** (e.g., "Concept Proposal") is always included.
-        2.  **Sequential Context (Lower Priority):** The compacted content of the **immediately preceding approved document** is included.
-    -   **Intelligent Truncation (`truncatePrompt`)**: Before sending, the prompt's total character count is checked. If it exceeds the safety limit, the prompt is truncated from the end. This is a safeguard against API errors for very large projects.
--   **Content Compaction**
-    -   After every successful document generation, a **second, separate AI call** is made using `PROMPTS.compactContent`. This creates a dense, information-rich summary of the new document. This compacted version is then stored and used for all future context-gathering steps, significantly reducing token usage and improving the signal-to-noise ratio for the AI.
+### B. Express Routing Layer (`server.ts`)
+The server exposes structured JSON API endpoints:
+- **`POST /api/auth/signup`**: Registers users, hashes passwords securely using `bcrypt` (10 salt rounds), and writes them to the SQLite database.
+- **`POST /api/auth/login`**: Authenticates credentials, returning a user context (excluding password hashes) to be held in client session state.
+- **`POST /api/users/:id/geminikey`**: Overwrites or registers a custom Gemini API key for a specified user profile.
+- **`GET /api/projects`**: Retreives workspaces. If a `userId` query parameter is supplied, it isolates results to that user's projects.
+- **`POST /api/projects`**: Expects an array of serialized project objects, performing an `INSERT OR REPLACE` transaction inside the SQLite DB.
+- **`DELETE /api/projects/:id`**: Completely purges a specific project by workspace ID.
+- **`DELETE /api/projects`**: Performs a cascade deletion of projects.
 
 ---
 
-### 5. Plan Parsing & Execution Phase
+## 🎛️ 2. Frontend State Management & Syncing
 
-This logic in `ProjectDashboard.tsx` bridges the gap from planning to execution.
+### A. Core React State Engine (`App.tsx`)
+The application is governed by a **single source of truth** pattern managed inside `App.tsx`:
+1. **Authentication Observer**: The hook `authService.onAuthStateChanged` listens for active session changes. When a user is detected, it loads their workspace list from `/api/projects?userId=...` and updates React state.
+2. **Top-Down Prop Drilling**: Child views (Dashboard, Phases, Tracking) receive state read access and update actions via drilled callbacks (`saveProject`, `handleSave`, etc.), which serialize and flush the entire updated project tree back to the Express endpoint.
+3. **Local Cache Mirror**: To ensure near-instantaneous page transitions, key configurations (like `selectedProjectId` or active user flags) are mirrored in browser `localStorage`.
 
--   **Trigger (`useEffect` hook)**
-    -   A `useEffect` hook continuously compares the previous and current state of the project's documents. It triggers only once, at the exact moment the final required document's status changes to "Approved".
-    -   It runs only if the project's `tasks` array is empty, preventing it from overwriting an existing plan.
--   **Parsing (`parseAndPopulateProjectPlan`)**
-    -   It retrieves the markdown content from the "Detailed Plans (WBS/WRS)" document.
-    -   Using a `parseMarkdownTable` helper, it converts the `## Tasks` and `## Milestones` tables into structured JavaScript objects.
--   **Data Population**
-    -   It assigns unique IDs, resolves task dependencies by mapping string names to newly created IDs, and assigns tasks to sprints.
-    -   The resulting `tasks` and `milestones` arrays are saved to the project state, which automatically populates all tools in the "Project Tracking" view (Gantt, Kanban, etc.).
+### B. Synchronous Multi-Tab Orchestration (`syncService.ts`)
+To prevent concurrent editing collisions when a user has multiple tabs open on the same machine:
+- A `BroadcastChannel` named `'hmap_sync_channel'` is established on page mount.
+- Whenever a tab executes a write transaction, it broadcasts a `'hmap_state_updated'` event.
+- Sister tabs capture this frame, bypass internal update loops, and trigger a background fetch to the SQLite server, instantly keeping all view canvases in sync.
 
----
-
-### 6. Multi-User & Collaboration Features
-
--   **Team Management (`TeamView.tsx`)**
-    -   Team roles are dynamically parsed from the AI-generated "Resources & Skills List" document.
-    -   The project owner can assign users to roles and transfer project ownership.
--   **Task Collaboration (`TaskDetailModal.tsx`)**
-    -   Users can add comments (with `@` mentions) and attach files.
-    -   When a recurring task is completed, a new instance for the next interval is automatically created.
--   **Notifications (`ProjectDashboard.tsx` -> `handleUpdateTask`)**
-    -   When a task is marked "done", the system checks for any tasks that depended on it.
-    -   If a dependent task is now fully unblocked, a notification is created for the user assigned to that task's role. The `Header` component displays the unread count.
+### C. Remote Database Synchronization (`storage.ts`)
+- In addition to local broadcasts, `subscribeToRemoteChanges` runs a lightweight **polling engine** that checks `/api/projects` every 10 seconds.
+- This merges any server-side state edits made by collaborators or other systems into the active React view, enabling real-time cooperative tracking.
 
 ---
 
-### 7. Potential Improvements & Future Architecture
+## 🧠 3. Advanced AI Engine & Prompt Engineering
 
-This section outlines a strategic roadmap for scaling the application beyond its current prototype stage.
+The core automation mechanics are executed client-side via the `@google/genai` TypeScript SDK, routed through optimized prompt context generators.
 
--   **State Management**
-    -   **Problem:** The current "prop-drilling" approach is becoming complex. State changes deep in the component tree require callbacks passed through many layers.
-    -   **Solution:** Introduce a centralized state management library like **Zustand** or **Redux Toolkit**. This would create a global store for projects and the current user, allowing any component to access and update state directly, simplifying components and improving maintainability.
+### A. Intelligent Context Compaction
+To minimize token consumption and maintain extreme logical alignment over a long planning cycle, the app uses a dual-step pipeline:
+1. **Initial Generation**: The AI generates a lengthy, natural-language document (e.g. Feasibility Study) matching a highly formatted HMAP template.
+2. **Context Compaction**: The app immediately fires a background request (`PROMPTS.compactContent`) to the AI, instructing it to summarize the newly generated document into a condensed, information-dense Markdown bullet list.
+3. **Feeding the Context Loop**: In downstream phases, the AI is fed these compacted summaries instead of the full natural-language logs, preventing context drift while avoiding rate limits or token overflow.
 
--   **Backend & Database**
-    -   **Problem:** `localStorage` is not a scalable or secure solution for a true multi-user application. It doesn't support real-time collaboration or data sharing between different users.
-    -   **Solution:** Migrate to a proper backend-as-a-service (**Firebase** or **Supabase**) or a custom backend (e.g., **Node.js/Express**).
-        -   **Authentication:** Replace the mock `authService` with a robust provider like Firebase Authentication.
-        -   **Database:** Use a cloud database like **Firestore** or **PostgreSQL** to store user and project data. This is the foundation for all real-time features.
+### B. Prompt Token Guarding & Retries
+- **Intelligent Truncation (`truncatePrompt`)**: Prevents API crashes when input variables grow too large by automatically parsing character limits and trimming prompts cleanly from the bottom up.
+- **Resilient API Calls (`withRetry`)**: Wraps all generation pipelines. If the Gemini API fails due to standard networking drops, temporary 503 overflows, or rate-limits, the helper automatically retries the query up to 2 times with an exponential backoff curve.
+- **Rate Limit Safeguards**: A forced **3-second delay** is inserted between sequential automated generations (Phase 1-7 loops) to prevent standard `HTTP 429` (Too Many Requests) failures on free-tier Gemini API keys.
 
--   **Real-time Collaboration**
-    -   **Problem:** The current `BroadcastChannel` only syncs tabs for the *same user* on the *same machine*. It cannot show User A the changes User B is making.
-    -   **Solution:** Leverage the chosen backend's real-time capabilities.
-        -   With **Firestore**, use its real-time listeners (`onSnapshot`) to automatically push updates to all connected clients.
-        -   With a custom backend, implement **WebSockets** to broadcast changes to all members of a project. This would enable features like live document editing and seeing tasks move on the Kanban board in real-time.
+---
 
--   **Performance Optimization**
-    -   **Problem:** The Gantt chart and other list-based views currently render all their items at once, which can cause lag on very large projects with hundreds of tasks.
-    -   **Solution:** Implement **UI virtualization** (windowing) using libraries like `react-window` or `tanstack-virtual`. This technique only renders the items currently visible in the viewport, drastically improving performance for large datasets.
-    -   **Web Workers:** For CPU-intensive tasks like parsing a very large project plan or handling large file uploads, move the logic to a **Web Worker**. This would prevent the main UI thread from freezing, ensuring the application remains responsive.
+## 📊 4. Structural Plan Parsing & Execution
 
--   **Code Architecture**
-    -   **Problem:** API logic is currently mixed within component files (e.g., `ProjectDashboard.tsx`).
-    -   **Solution:** Create a dedicated **API service layer**. All functions that interact with the Gemini API or a future backend should be abstracted into a separate module (e.g., `src/services/apiService.ts`). This improves separation of concerns and makes the code easier to test and maintain.
+Once Phase 7 ("Develop Detailed Plans & Timeline") is marked complete, the application bridges natural-language planning into structured visual tools using the following parser chain:
+
+### A. Markdown Table Extractor (`markdownParser.ts`)
+The AI-generated planning document output for Phase 7 includes structured Markdown tables representing tasks and milestones:
+
+```markdown
+| Task Name | Role | Start Day | Duration (Days) | Prerequisites | Sprint | Description |
+|-----------|------|-----------|-----------------|---------------|--------|-------------|
+```
+
+The frontend parses these lines, isolates the table rows, and parses cell values:
+1. **Sanitization**: Standardizes column names, cell delimiters, and handles empty values.
+2. **Dependency Mapping**: Maps textual prerequisites (e.g., "Write SOW") to generated ID strings.
+3. **ID Generation**: Assigns consistent, unique entity IDs (`task-${Date.now()}-${random}`) to each row.
+4. **Dates Initialization**: Translates relative start offsets (e.g., "Day 5") into actual Gregorian dates offset from the project's baseline start date.
+
+### B. Gantt & Blocked Task Diagnostics
+- Tasks that have prerequisite IDs listed but whose prerequisite tasks have not been marked `done` are flagged as **Blocked**.
+- In the Gantt and Task lists, these are visually styled with warning states (red striped overlays) so team members immediately know what work is stuck.
+- **Action Chains**: Marking a task `done` triggers a search through dependent items, resolving their prerequisites, and firing unread alerts to the user profiles assigned to those roles.
+
+---
+
+## 🔍 5. Diagnostic Logging Buffer (`logging.ts`)
+
+To inspect complex asynchronous operations and prevent rendering failures:
+- The app maintains an in-memory ring buffer capturing timestamps, module tags, action keys, and state objects.
+- This buffer can be exported as a standard `logs.md` file from the floating in-app Help Modal for debugging and compliance.

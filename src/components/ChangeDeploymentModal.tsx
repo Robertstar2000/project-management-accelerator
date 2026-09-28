@@ -82,13 +82,18 @@ export const ChangeDeploymentModal = ({ isOpen, onClose, deploymentPlan, project
                     updatedTasks.push({
                         id: `task-${Date.now()}`,
                         name: step.target,
+                        role: step.details['Role'] || null,
                         startDate: step.details['Start'] || new Date().toISOString().split('T')[0],
                         endDate: step.details['End'] || new Date().toISOString().split('T')[0],
-                        sprintId: step.details.sprintId || project.sprints[0]?.id,
+                        sprintId: step.details.sprintId || project.sprints[0]?.id || 'Sprint 1',
                         status: 'todo',
+                        isSubcontracted: false,
                         dependsOn: step.details.dependsOnId ? [step.details.dependsOnId] : [],
                         actualTime: null,
                         actualCost: null,
+                        actualEndDate: null,
+                        comments: [],
+                        attachments: []
                     });
                     break;
                 case 'DELETE':

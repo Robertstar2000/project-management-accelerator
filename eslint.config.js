@@ -30,6 +30,7 @@ export default tseslint.config(
       'react/prop-types': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-namespace': 'off',
     },
     settings: {
       react: {

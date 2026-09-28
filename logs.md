@@ -1,40 +1,49 @@
+# MIFECO Hub System & Debugging Logs
 
-# HMAP Application Logs
+This document serves as a reference for the diagnostic, in-memory logging system implemented in the application. It captures critical events, asynchronous pipelines, and background database synchronizations to help diagnose system latency, rate limits, or rendering issues.
 
-This file serves as a reference for the in-memory logging system implemented in the application.
+---
 
-## Debugging Instructions
+## 🧭 How to Retrieve logs
 
-The application now includes a robust in-memory logging buffer to trace state updates, API calls, and component lifecycles. This is designed to diagnose the "white screen" or "overlay" issues reported during AI operations.
+If you encounter unexpected errors, network exceptions, or empty AI generation fields during operations:
+1. Locate the floating `?` support button in the bottom right corner of the workspace.
+2. Click to reveal the **Mission Support** (Help Modal) overlay.
+3. Click the amber **"Download Debug Logs"** action button in the footer.
+4. A standard Markdown log file (`logs.md`) will automatically download to your local machine, capturing all system traces recorded since your session started.
 
-### How to Access Logs
+---
 
-1.  Open the application.
-2.  Click the floating `?` button in the bottom right corner to open the **Help Modal**.
-3.  Click the **"Download Debug Logs (logs.md)"** button at the bottom of the modal.
-4.  A `.md` file containing the session's logs will be downloaded to your device.
+## 🛠️ Traced Systems & Events
 
-### Log Format
+The in-memory logger actively monitors these core functional areas:
 
-Each log entry follows this structure:
-`- **[Timestamp]** `Action` @ *Element*: { details }`
+### A. Authentication & Session Management (`App.tsx`)
+- `Auth`: Records registration (`/api/auth/signup`) and session initialization (`/api/auth/login`).
+- `Sync`: Logs the status of tab reloading, identifying whether local updates or external changes prompted a database refresh.
 
-### Key Trace Areas
+### B. Remote Synchronization & Persistence (`storage.ts`)
+- `Storage`: Captures database-saving queries and updates pushed to `/api/projects`.
+- `Remote Changes`: Tracks the polling engine status every 10 seconds, logging incoming record sizes to ensure background changes are merged smoothly.
 
-The following critical paths have been instrumented:
+### C. Gemini AI Client Pipelines (`ProjectDashboard.tsx` / `geminiClient.ts`)
+- `AI Start`: Captures when an AI-prompt compilation begins, detailing the relevant context items parsed.
+- `AI Compaction`: Traces the background compression routines (`PROMPTS.compactContent`) that condense completed templates to save API tokens.
+- `AI Retry`: Logs rate-limit errors (HTTP 429) or transient timeouts, tracking exponential backoff retry counts (up to 2 iterations).
 
--   **App.tsx**:
-    -   `reloadStateFromStorage`: Logs when the app attempts to sync from `localStorage`.
-    -   `saveProjectsToStorage`: Logs when data is persisted.
-    -   `isInternalUpdate`: Logs when a sync event is ignored because it originated from the current tab (preventing loops).
+### D. Layout Lifecycle Tracing
+- `Mount/Unmount`: Tracks component instantiations. Frequent unmounting suggests state volatility or key-prop collisions in the routing tree.
+- `Parsing Errors`: Logs any structural exceptions encountered by the Markdown table extractor during Phase 7 conversions.
 
--   **ProjectDashboard.tsx**:
-    -   `Mount/Unmount`: Logs when the dashboard component is created or destroyed. Frequent unmounts indicate a `key` prop issue or parent state instability.
-    -   `handleGenerateContent`: Logs the start, progress (step), and completion of AI generation tasks.
-    -   `handleSave`: Logs attempts to save project data, noting if the component was unmounted during the process.
+---
 
-### Common Issues Diagnosed
+## 📝 Diagnostic Format
 
--   **Infinite Loops**: If `reloadStateFromStorage` triggers `saveProjectsToStorage`, which triggers `reload...`, the logs will show a rapid cascade of these events.
--   **Unmount during Async**: If `handleGenerateContent` logs "Start" but never "Success" or "Error", and an `Unmount` log appears in between, the component is being destroyed prematurely (likely due to a key change in `App.tsx`).
--   **Empty AI Responses**: Logs will capture specific error messages if the AI returns empty strings or fails.
+Log entries are captured in a structured stream:
+```markdown
+- **[Timestamp]** `Action/Module` @ *Component*: { details }
+```
+
+### Common Debug Scenarios
+- **Polling Conflict**: High frequency of overlapping reads suggests polling triggers are active during heavy user-editing blocks.
+- **Empty AI Responses**: Log blocks capture exact HTTP error states or empty string returns from the Google Gemini API to pinpoint invalid API keys or token limits.

@@ -14,7 +14,13 @@ const getStatusChipClass = (status) => {
     }
 };
 
-export const DocumentsView = ({ project, documents, onUpdateDocument, phasesData }) => {
+export const DocumentsView = ({ project, documents, onUpdateDocument, phasesData, onOpenExportModal }: {
+    project: any;
+    documents: Document[];
+    onUpdateDocument: (id: string, status: string) => void;
+    phasesData: Record<string, any>;
+    onOpenExportModal?: () => void;
+}) => {
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const [isGenerating, setIsGenerating] = useState<string | null>(null);
     const [viewingDocument, setViewingDocument] = useState<{title: string, content: string, type?: 'text' | 'image'} | null>(null);
@@ -107,6 +113,20 @@ export const DocumentsView = ({ project, documents, onUpdateDocument, phasesData
             <div className="tool-card">
                 <h2 className="subsection-title">Documents Center</h2>
                 <div style={{display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap'}}>
+                    {onOpenExportModal && (
+                        <button 
+                            className="button" 
+                            onClick={onOpenExportModal}
+                            style={{
+                                background: 'linear-gradient(135deg, rgba(6,182,212,0.2) 0%, rgba(99,102,241,0.2) 100%)',
+                                border: '1px solid rgba(6,182,212,0.4)',
+                                color: '#06b6d4',
+                                fontWeight: 600
+                            }}
+                        >
+                            Export Summary (PDF / JSON)
+                        </button>
+                    )}
                     <button className="button" onClick={handleDownloadAll} disabled={!!isGenerating}>Download All as .zip</button>
                 </div>
                 <table className="document-table">

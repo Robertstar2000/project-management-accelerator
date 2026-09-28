@@ -10,6 +10,7 @@ export const saveProjectsToDB = async (projects: Project[], userId?: string): Pr
             headers: {
                 'Content-Type': 'application/json'
             },
+            credentials: 'include',
             body: JSON.stringify(projects)
         });
         if (!response.ok) {
@@ -24,7 +25,8 @@ export const saveProjectsToDB = async (projects: Project[], userId?: string): Pr
 export const deleteProjectFromDB = async (projectId: string): Promise<void> => {
     try {
         const response = await fetch(`/api/projects/${projectId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
         });
         if (!response.ok) {
             throw new Error('Failed to delete project from backend');
@@ -39,7 +41,8 @@ export const deleteAllProjectsFromDB = async (userId?: string): Promise<void> =>
     try {
         const url = userId ? `/api/projects?userId=${encodeURIComponent(userId)}` : '/api/projects';
         const response = await fetch(url, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
         });
         if (!response.ok) {
             throw new Error('Failed to delete all projects from backend');
@@ -53,8 +56,13 @@ export const deleteAllProjectsFromDB = async (userId?: string): Promise<void> =>
 export const loadProjectsFromDB = async (userId?: string): Promise<Project[]> => {
     try {
         const url = userId ? `/api/projects?userId=${encodeURIComponent(userId)}` : '/api/projects';
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            credentials: 'include'
+        });
         if (!response.ok) {
+            if (response.status === 401) {
+                return [];
+            }
             throw new Error('Failed to load projects from backend');
         }
         return await response.json();

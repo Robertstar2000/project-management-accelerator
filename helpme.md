@@ -1,110 +1,57 @@
-# MIFECO PM Accelerator
+# MIFECO Hub Help Center & User Manual
 
-An AI-powered project management companion that guides you through the full lifecycle of a project using the proven **Hyper-Agile Management Process (HMAP)**. This tool automates documentation, accelerates planning, and provides clear visibility into project execution for individuals and teams.
-
-## Core Features
-
--   **✨ AI-Powered Planning**: Generate comprehensive project documents, from concept proposals to detailed work breakdowns, in seconds using Google's Gemini API.
--   **🔐 Multi-User & Team-Based**: Secure user accounts ensure that projects are private. Assign roles and collaborate with your team.
--   **🧭 Structured Workflow**: Follow a clear, phase-based methodology (HMAP) that ensures all critical planning steps are completed in the right order, preventing downstream issues.
--   **📊 Comprehensive Tracking**: Visualize your project's progress with an interactive Gantt chart, Kanban board, workload heat map, and milestone tracker.
--   **💬 Collaboration Tools**: Dive into task details, leave comments, attach files, and receive automatic notifications when your work is unblocked.
--   **🎛️ Dynamic What-If Analysis**: Instantly model the impact of change requests on your budget and timeline before committing, enabling data-driven decision-making.
+Welcome to **MIFECO Hub**, your mission-critical assistant for accelerated project planning and execution. Designed around the principles of the **Hyper-Agile Management Process (HMAP)**, this workspace lets you draft, validate, and track complex projects in record time.
 
 ---
 
-## User Operations Manual
+## 🧭 System Operations Manual
 
-### 1. Getting Started: Account & API Key
+### 1. Account Settings & Authentication
+MIFECO Hub is fully multi-user. All account actions are processed by our secure backend database:
+- **Workspace Isolation**: Projects are securely tied to your user ID.
+- **Session Persistence**: Closing your tab or browser will not log you out. Your credentials and session state are managed by a local-session token verified against the database.
+- **Gemini API Configuration**: To power the AI engines, configure your personal Google Gemini API key on the Landing Page. If your administrator has enabled the promotional internal key, you can toggle it on from the dashboard settings.
 
-**User Account:**
--   The application now supports multiple users. You can **Sign Up** for a new account or **Login** to an existing one.
--   All projects you create are tied to your account. You can invite team members and transfer ownership.
+### 2. The 7 HMAP Planning Phases
+To design a flawless project plan, expand each of the 7 consecutive phases inside the **Project Phases View**:
+1. **Concept Proposal**: Initiate the draft with high-level mission ideas.
+2. **Feasibility Study & SWOT Analysis**: Determine critical risks, constraints, and success boundaries.
+3. **Resources & Skills List (WRS)**: Define the primary technical team profiles and labor rules.
+4. **Statement of Work (SOW)**: Lay down precise legal boundaries and client expectations.
+5. **Work Breakdown Structure (WBS)**: Deconstruct deliverables into high-level logical groups.
+6. **Milestone Plan**: Establish chronological check-points and delivery targets.
+7. **Develop Detailed Plans & Timeline**: Initiates a multi-layered parsing operation, analyzing all approved planning documents to construct your interactive tracking database.
 
-**API Key:**
--   The application requires a Google Gemini API key to power its AI features.
--   Upon first launch, you will be prompted to enter an API key from the landing page.
--   You can get your free key from [Google AI Studio](https://aistudio.google.com/app/apikey).
--   Your key is stored securely in your browser's local storage and is never sent to any server besides Google's.
+*Note: You must edit and mark each document as "Approved" to unlock the subsequent phase card.*
 
-### 2. My Work & Project Management
+### 3. Execution & Project Tracking
+Once Phase 7 completes, your project workspace transitions from Planning to Execution, unlocking these views:
+- **Gantt Chart**: Visualizes task durations and sequential dependencies. Blocked tasks (tasks awaiting prerequisite completion) are marked with distinctive red stripe overlays.
+- **Kanban Board**: Drag tasks between workflow columns (`To Do`, `In Progress`, `Done`) to instantly synchronize state across the workspace.
+- **Workload Map**: A resource scheduling grid highlighting weekly hour distributions for team roles to keep members from being over-allocated.
+- **Team Panel**: Manage user profile roles parsed directly from your WRS document. The workspace creator can transfer project ownership here.
+- **Milestones View**: Real-time progress bars and budget tracking for all key contract delivery dates.
+- **Alert Center**: Click the bell icon in the top header to view unread alerts triggered when preceding tasks are completed and your assigned deliverables become unblocked.
 
--   **My Work View**: The landing page now features a "My Work" dashboard, which automatically aggregates all tasks assigned to you across all your projects, conveniently sorted by due date.
--   **Project Creation**: Click **"Start Working"** or **"New Project"**. The project you create will be owned by you.
--   **Project List**: The main project list shows only projects that you own or are a team member of.
-
-### 3. The Project Dashboard
-
-The dashboard is your central hub for managing a project.
-
--   **Navigation**: Use the top tabs to switch between tools. Note that the `Dashboard`, `Project Tracking`, and `Revision Control` tabs are locked until the planning phases are complete.
--   **Notification Bell**: The header contains a notification bell. You will receive an alert here when a task you are assigned to becomes unblocked (meaning its prerequisite tasks have been completed).
--   **AI Quick Actions (in Dashboard View)**: Once planning is complete, you can use powerful AI actions:
-    -   **Analyze Project Risks**: Generates a detailed risk assessment based on the project's current status and planning documents.
-    -   **Generate Project Summary**: Creates a concise, professional status report suitable for stakeholders.
-    -   Generated reports can be viewed, copied, downloaded, or saved directly to the project's `Documents Center`.
-
-### 4. The HMAP Workflow (Project Phases View)
-
-This is the core of the planning process. Work through each phase sequentially to build a robust project plan.
-
-1.  **Open a Phase**: Click on a phase header to expand it. Phases are locked until the document immediately preceding it is marked as "Approved".
-2.  **Generate Content**: For Phase 1, provide your high-level project goals. For subsequent phases, the AI will use the content from all previously approved documents as context to generate the next one.
-3.  **Edit & Approve**: Manually edit the AI-generated content, attach supporting files, and click **"Mark as Complete"** (which sets the status to "Approved"). This unlocks the next phase.
-4.  **Automated Plan Generation (Phase 7)**: In the "Develop Detailed Plans & Timeline" phase, the AI reads your approved Statement of Work (SOW) and other documents to automatically generate a complete project plan. This includes a Work Breakdown Structure (WBS), a detailed task list, and key milestones, which populate the `Project Tracking` view.
-
-### 5. Project Tracking View
-
-Once the plan is generated, use this view to manage execution.
-
--   **Task List & Timeline (Gantt)**: View tasks in a list or on a Gantt chart. Dependencies are visualized as arrows. Blocked tasks (whose prerequisites are not complete) are marked with red stripes.
--   **Task Detail Modal**: Click on any task to open a detailed view where you can:
-    -   Edit the task's description.
-    -   Set a **recurrence schedule** (daily, weekly, monthly).
-    -   **Attach files**.
-    -   **Post comments** and use `@` to mention team members.
--   **Kanban Board**: A classic Kanban view to drag and drop tasks between statuses.
--   **Workload**: A heat map showing the total number of workdays assigned to each team member per week. Use this to identify and resolve resource overallocation.
--   **Team**: Assign your team members (by name and email) to the roles that were automatically extracted from the "Resources & Skills List" document. The project owner can also transfer ownership to another team member from this screen.
--   **Milestones & Resources**: Track progress against key dates and manage non-labor costs.
-
-### 6. Documents Center
-
--   Manage the status (`Working`, `Approved`, `Rejected`) of all formal project documents.
--   **Download All**: Package all your project documents into a single `.zip` file.
--   **Advanced Prompts**:
-    -   **Create Project Prompt**: Generates a single, massive prompt containing the application's logic and your project's specific state. This can be used in an external AI tool to regenerate the application's source code.
-    -   **Create Simulation Prompt**: Generates a prompt to run a detailed project simulation in an external AI tool, forecasting potential risks and outcomes.
-
-### 7. Revision & Change Control
-
-Model the impact of potential changes *before* they are approved.
-
--   Fill out the **Change Request** form and add **What-If Scenarios**.
--   The **Auto Impact Analysis** table will immediately show the projected budget and end date for the baseline, the change request, and each scenario, allowing for a clear, side-by-side comparison.
--   Generate an AI deployment plan and apply changes systematically.
+### 4. Revision & Change Control
+Safely model the real-world impact of delays, materials price hikes, or scope additions:
+1. Navigate to **Revision Control**.
+2. Submit a formal **Change Request** or hypothetical **What-If Scenario**.
+3. Inspect the **Auto Impact Analysis** matrix to instantly compare differences in project cost, duration, and final delivery dates before merging changes into your active timeline.
 
 ---
 
-## Tutorial: The AI-Accelerated HMAP
+## 💡 What is HMAP?
 
-This tool is built on the **Hyper-Agile Management Process (HMAP)**, a methodology inspired by the rapid, iterative, and first-principles approach used at companies like SpaceX. Its goal is to move from concept to execution as quickly as possible while maintaining rigor and alignment.
+The **Hyper-Agile Management Process (HMAP)** is an accelerated engineering planning framework inspired by rapid-prototyping workflows. It minimizes unproductive document-writing overhead by using AI as a highly structured strategic partner:
+- **Zero Blank Pages**: AI generates industry-standard drafts instantly, letting managers focus on strategic adjustments rather than writing.
+- **Rigorous Consistency**: The system compresses previous decisions into a dense "Compacted Context" block, feeding it into successive AI prompts so that early guidelines carry seamlessly into task breakdowns.
+- **Continuous Integration**: When a scope change is approved, the downstream timeline, task list, and workload maps are updated automatically.
 
-**Core HMAP Principles:**
+---
 
--   **Extreme Speed**: Compress the planning cycle from months to days or hours.
--   **Iterative Planning**: Build the project plan layer by layer, with each phase informing the next. Don't plan everything in perfect detail from day one.
--   **Automated Rigor**: Use templates and automation to ensure no steps are skipped.
--   **Clear Ownership & Responsibility**: Force early definition of roles and responsibilities (WRS/RACI).
--   **Proactive Analysis**: Analyze risks (SWOT) and change impacts *before* they derail the project.
-
-**How AI Accelerates HMAP:**
-
-The MIFECO PM Accelerator uses AI as a powerful co-pilot to supercharge the HMAP workflow.
-
--   **Eliminates "Blank Page" Problem**: Instead of spending hours writing a Concept Proposal or SOW, the AI generates a comprehensive, context-aware draft in seconds (Phase 1, 5). These drafts are written using professional, industry-standard terminology, allowing project managers to shift their focus from writing to strategy and refinement.
--   **Ensures Consistency**: The AI uses the outputs of previous phases as context for the next, ensuring a consistent thread of logic flows through the entire plan, from high-level concept to detailed task lists.
--   **Automates Tedious Breakdown**: A powerful feature is the AI-powered plan generation that occurs in **Phase 7 (Develop Detailed Plans & Timeline)**. The AI parses the natural language from the Statement of Work and other planning documents, then converts it into a structured project plan, including a Work Breakdown Structure (WBS), a detailed task list, and project milestones. This single step populates all the tools in the Project Tracking view and can save dozens of hours of manual planning.
--   **Enables Rapid Re-planning**: If a major change occurs, you can quickly regenerate subsequent planning documents with the new context, allowing for agility that is impossible with traditional methods.
-
-By following the HMAP phases within this tool, you are guided through a best-practice planning process that is both incredibly fast and remarkably thorough, setting your project up for success from the very beginning.
+## 🛠️ Workspace Diagnostics & Log Sync
+If you encounter unexpected errors, white screens, or API key issues:
+1. Try refreshing your page to force a background reload from the SQLite server.
+2. Use the **Download Debug Logs** action below to package your in-memory session traces for technical support.
+3. Your workspace is synchronized across all active browser tabs using a real-time `BroadcastChannel` update system.

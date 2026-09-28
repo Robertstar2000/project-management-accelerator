@@ -17,13 +17,17 @@ import * as authService from './utils/authService';
 import { subscribeToUpdates, notifyUpdate } from './utils/syncService';
 import { Project, Task, Notification, User } from './types';
 import { saveProjectsToDB, loadProjectsFromDB, migrateFromLocalStorage, subscribeToRemoteChanges, deleteProjectFromDB, deleteAllProjectsFromDB } from './utils/storage';
+import { LlmProviderModal } from './components/LlmProviderModal';
+import { syncLlmSettingsFromServer } from './utils/llmStorage';
 
 const App = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => localStorage.getItem('hmap-selected-project-id'));
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
   const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
+
   const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
@@ -65,6 +69,9 @@ const App = () => {
             // Check for local storage migration
             const migrated = await migrateFromLocalStorage(user.id);
             if (migrated) setProjects(migrated);
+
+            // Sync remote LLM provider settings
+            await syncLlmSettingsFromServer(user.id);
         } catch (e) {
             console.error("Data loading error:", e);
         }
@@ -164,7 +171,7 @@ const App = () => {
     }
   };
 
-  const handleCreateProject = useCallback(({ name, template, mode, scope, teamSize, complexity }: { name: string, template: any, mode: string, scope: string, teamSize: string, complexity: string }) => {
+  const handleCreateProject = useCallback(({ name, template, mode, scope, teamSize, complexity, generationMode = 'manual' }: { name: string, template: any, mode: string, scope: string, teamSize: string, complexity: string, generationMode?: 'manual' | 'automatic' }) => {
     if (!currentUser) return;
     const today = new Date();
     const endDate = new Date(today);
@@ -230,7 +237,7 @@ const App = () => {
         if (!hasDoc) {
             finalDocuments.push({
                 id: `doc-mandatory-${Date.now()}-${mandatoryDoc.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-                title: mandatoryDoc.title, version: 'v1.0', status: 'Working', owner: 'A. User', phase: mandatoryDoc.phase,
+                title: mandatoryDoc.title, version: 'v1.0', status: 'Working', owner: currentUser.username || 'Project Lead', phase: mandatoryDoc.phase,
                 sequence: mandatoryDoc.sequence,
                 metadata: {
                     filename: `${mandatoryDoc.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`,
@@ -244,7 +251,7 @@ const App = () => {
         const hasRFP = finalDocuments.some((doc: Document) => doc.title.toLowerCase().includes('request for proposal') || doc.title.toLowerCase().includes('rfp'));
         if (!hasRFP) {
             finalDocuments.push({
-                id: `doc-subco-${Date.now()}-rfp`, title: 'Request for Proposal (RFP)', version: 'v1.0', status: 'Working', owner: 'A. User', phase: 2, sequence: 50,
+                id: `doc-subco-${Date.now()}-rfp`, title: 'Request for Proposal (RFP)', version: 'v1.0', status: 'Working', owner: currentUser.username || 'Project Lead', phase: 2, sequence: 50,
                 metadata: { filename: 'rfp.json', created: new Date().toISOString() }
             });
         }
@@ -252,14 +259,14 @@ const App = () => {
         const hasContract = finalDocuments.some((doc: Document) => doc.title.toLowerCase().includes('contract') || doc.title.toLowerCase().includes('agreement'));
         if (!hasContract) {
              finalDocuments.push({
-                id: `doc-subco-${Date.now()}-contract`, title: "Draft Contract with T's & C's", version: 'v1.0', status: 'Working', owner: 'A. User', phase: 5, sequence: 50,
+                id: `doc-subco-${Date.now()}-contract`, title: "Draft Contract with T's & C's", version: 'v1.0', status: 'Working', owner: currentUser.username || 'Project Lead', phase: 5, sequence: 50,
                 metadata: { filename: 'contract.json', created: new Date().toISOString() }
             });
         }
     }
     
     const newProject: Project = { 
-        id: Date.now().toString(), name, mode, scope, generationMode: 'manual', teamSize, complexity: complexity || 'typical', discipline: template.discipline,
+        id: Date.now().toString(), name, mode, scope, generationMode, isPlanSelected: true, teamSize, complexity: complexity || 'typical', discipline: template.discipline,
         ownerId: currentUser.id,
         phasesData: {},
         team: [{ userId: currentUser.id, role: 'Project Owner', name: currentUser.username, email: currentUser.email }],
@@ -381,6 +388,7 @@ const App = () => {
                     onNotificationClick={() => {}}
                     onMarkAllRead={() => {}}
                     onClearAllProjects={handleClearAllProjects}
+                    onOpenKeyModal={() => setIsLlmModalOpen(true)}
                 />
                 <main>
                     {selectedProject ? (
@@ -407,11 +415,20 @@ const App = () => {
                                 setSetupKey(prev => prev + 1);
                             }}
                             currentUser={currentUser}
+                            onOpenKeyModal={() => setIsLlmModalOpen(true)}
                         />
                     )}
                 </main>
 
+                {/* Universal LLM Provider & Key Configuration Modal */}
+                <LlmProviderModal
+                    isOpen={isLlmModalOpen}
+                    onClose={() => setIsLlmModalOpen(false)}
+                    currentUser={currentUser}
+                />
+
                 {isModalOpen && (
+
                     <NewProjectModal 
                         isOpen={true} 
                         onClose={() => setIsModalOpen(false)} 

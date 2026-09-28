@@ -4,8 +4,10 @@ export interface User {
     email: string;
     password?: string;
     geminiKey?: string;
-    tier?: string;
+    plan?: 'free' | 'business' | 'enterprise' | 'studio_test';
+    stripeCustomerId?: string;
     notificationPrefs?: {
+
         teams: boolean;
         slack: boolean;
         outlook: boolean;
@@ -142,6 +144,39 @@ export interface Project {
         selectedArtifacts?: string[];
     }>;
     generationMode: 'manual' | 'automatic';
+    isPlanSelected?: boolean;
     notifications: Notification[];
     isStarted?: boolean;
 }
+
+export type LlmProviderId = 'google' | 'openai' | 'anthropic' | 'ollama' | 'openrouter';
+export type AuthMode = 'api_key' | 'oauth';
+
+export interface ModelOption {
+    id: string;
+    name: string;
+    description: string;
+    recommended?: boolean;
+    tag?: string;
+}
+
+export interface ProviderConfig {
+    provider: LlmProviderId;
+    authMode: AuthMode;
+    apiKey?: string;
+    baseUrl?: string; // for Ollama / custom gateway
+    model: string;
+    isCustomModel?: boolean;
+    oauthConnected?: boolean;
+    oauthAccountEmail?: string;
+    oauthPlanName?: string;
+    oauthExpiresAt?: number;
+    testedSuccessfully?: boolean;
+    lastTestedAt?: string;
+}
+
+export interface LlmGlobalSettings {
+    activeProvider: LlmProviderId;
+    configs: Record<LlmProviderId, ProviderConfig>;
+}
+

@@ -1,5 +1,8 @@
 {
-  "name": "MIFECO PM Accelerator",
-  "description": "A comprehensive project management application following the HMAP process, with AI-powered features.",
-  "requestFramePermissions": []
+  "name": "Mifeco Project Suite",
+  "description": "Mifeco Project Suite - An advanced collaborative project planning, tracking, and execution platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

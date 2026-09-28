@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Project, Task, Notification, User, Milestone, Document } from '../types';
+import { GenerateContentResponse } from "@google/genai";
+import { Project, Task, User, Milestone, Document } from '../types';
 import { PHASES, PROMPTS, GRAPHICAL_ARTIFACTS } from '../constants/projectData';
 import { DashboardView } from '../tools/DashboardView';
 import { ProjectPhasesView } from './ProjectPhasesView';
@@ -9,10 +9,11 @@ import { DocumentsView } from '../tools/DocumentsView';
 import { ProjectTrackingView } from '../tools/ProjectTrackingView';
 import { RevisionControlView } from '../tools/RevisionControlView';
 import { DownloadModal } from '../components/DownloadModal';
-import { logAction } from '../utils/logging';
+import { ProjectExportModal } from '../components/ProjectExportModal';
+import { Share2 } from 'lucide-react';
 import { TaskDetailModal } from '../components/TaskDetailModal';
 import { AiReportModal } from '../components/AiReportModal';
-import { parseMarkdownTable, parseRolesFromMarkdown, parseResourcesFromMarkdown } from '../utils/be-logic';
+import { parseRolesFromMarkdown, parseResourcesFromMarkdown } from '../utils/be-logic';
 import { executeTrackingDataWorkflow } from '../utils/trackingDataAgentWorkflow';
 import { getGeminiClient } from '../utils/geminiClient';
 
@@ -91,6 +92,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
     const [isGeneratingReport, setIsGeneratingReport] = useState<'risk' | 'summary' | null>(null);
     const [isBasicPlanRunning, setIsBasicPlanRunning] = useState(false);
     const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [zipBlob, setZipBlob] = useState<Blob | null>(null);
     const isProcessingRef = useRef(false);
 
@@ -103,7 +105,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         if (project.id !== projectDataRef.current.id) {
             setProjectData(project);
         }
-    }, [project, project.id]);
+    }, [project]);
 
     const projectPhases = useMemo(() => {
         return [...projectData.documents]
@@ -347,7 +349,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             setLoadingPhase({ docId: null, step: null });
             isProcessingRef.current = false;
         }
-    }, [handleSave, isAutoGenerating]);
+    }, [handleSave, isAutoGenerating, handleGenerateImages]);
 
     const handleUpdatePhaseData = useCallback(async (docId: string, content: string) => {
         handleSave(prev => ({ phasesData: { ...prev.phasesData, [docId]: { ...(prev.phasesData[docId] || {}), content } } }));
@@ -432,7 +434,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         handleSave(prev => ({ phasesData: { ...prev.phasesData, [docId]: { ...(prev.phasesData[docId] || {}), attachments: (prev.phasesData[docId]?.attachments || []).filter(a => a.name !== fileName) } } }));
     }, [handleSave]);
 
-    const handleSetGenerationMode = (mode: 'manual' | 'automatic') => handleSave({ generationMode: mode });
+    const handleSetGenerationMode = (mode: 'manual' | 'automatic') => handleSave({ generationMode: mode, isPlanSelected: true });
 
     const handleBasicPlan = useCallback(async () => {
         if (isBasicPlanRunning || isProcessingRef.current) return;
@@ -491,14 +493,14 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             setIsDownloadModalOpen(true);
             
             // Mark as started/complete to unlock everything
-            handleSave({ isStarted: true });
+            handleSave({ isStarted: true, isPlanSelected: true });
         } catch (e: any) {
             console.error("Basic Plan Error:", e);
             setError("Basic Plan generation failed: " + e.message);
         } finally {
             setIsBasicPlanRunning(false);
         }
-    }, [handleGenerateContent, handleCompletePhase, handleSave]);
+    }, [isBasicPlanRunning, handleGenerateContent, handleCompletePhase, handleSave]);
 
     const runAutomaticGeneration = useCallback(async () => {
         if (isAutoGenerating || isProcessingRef.current) return;
@@ -527,8 +529,29 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         isProcessingRef.current = true;
         setLoadingPhase({ docId: 'agent', step: 'Planner Agent: Processing...' });
         try {
-            const { tasks, milestones } = await executeTrackingDataWorkflow(projectData, (msg) => setLoadingPhase({ docId: 'agent', step: msg }));
-            handleSave({ tasks, milestones, isStarted: true });
+            const { tasks, milestones, roles } = await executeTrackingDataWorkflow(projectData, (msg) => setLoadingPhase({ docId: 'agent', step: msg }));
+            
+            // Unify discovered roles into project.team
+            const currentTeam = [...(projectData.team || [])];
+            const existingRoles = new Set(currentTeam.map(m => m.role));
+            const allDiscoveredRoles = Array.from(new Set([
+                ...roles,
+                ...tasks.map(t => t.role).filter(Boolean)
+            ]));
+
+            allDiscoveredRoles.forEach(r => {
+                if (r && !existingRoles.has(r)) {
+                    currentTeam.push({
+                        userId: `team-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                        role: r,
+                        name: '',
+                        email: ''
+                    });
+                    existingRoles.add(r);
+                }
+            });
+
+            handleSave({ tasks, milestones, team: currentTeam, isStarted: true });
             handleTabChange('Project Tracking');
         } catch (e: any) { setError("Agentic planning failed: " + e.message); }
         finally { 
@@ -785,15 +808,43 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                     </div>
                 </div>
                 
-                <div style={{ display: 'flex', gap: '2rem', textAlign: 'right' }}>
-                    <div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Budget</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary-text)' }}>${projectData.budget.toLocaleString()}</div>
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '2rem', textAlign: 'right' }}>
+                        <div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Budget</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary-text)' }}>${(projectData.budget || 0).toLocaleString()}</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Team</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary-text)' }}>{projectData.team?.length || 0} Members</div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Resources</div>
+                            <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary-text)' }}>{projectData.resources?.length || 0} Items</div>
+                        </div>
                     </div>
-                    <div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Team</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary-text)' }}>{projectData.team.length} Members</div>
-                    </div>
+                    
+                    <button
+                        onClick={() => setIsExportModalOpen(true)}
+                        className="button"
+                        id="export-summary-btn"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: 'linear-gradient(135deg, rgba(6,182,212,0.15) 0%, rgba(99,102,241,0.15) 100%)',
+                            border: '1px solid rgba(6,182,212,0.4)',
+                            color: '#06b6d4',
+                            fontWeight: 600,
+                            padding: '0.6rem 1.2rem',
+                            borderRadius: '100px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem'
+                        }}
+                    >
+                        <Share2 size={16} />
+                        <span>Export Summary</span>
+                    </button>
                 </div>
             </div>
 
@@ -856,6 +907,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                     isPlanningComplete={projectData.documents.filter(d => d.type !== 'image').every(d => d.status === 'Approved')} 
                     projectPhases={projectPhases} onAnalyzeRisks={handleAnalyzeRisks} 
                     onGenerateSummary={handleGenerateSummary} isGeneratingReport={isGeneratingReport} 
+                    onOpenExportModal={() => setIsExportModalOpen(true)}
                 />
             )}
             
@@ -881,7 +933,15 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 </div>
             )}
             
-            {activeTab === 'Documents' && <DocumentsView project={projectData} documents={projectData.documents} onUpdateDocument={(id, status) => handleSave(p => ({ documents: p.documents.map(d => d.id === id ? { ...d, status } : d) }))} phasesData={projectData.phasesData} />}
+            {activeTab === 'Documents' && (
+                <DocumentsView 
+                    project={projectData} 
+                    documents={projectData.documents} 
+                    onUpdateDocument={(id, status) => handleSave(p => ({ documents: p.documents.map(d => d.id === id ? { ...d, status } : d) }))} 
+                    phasesData={projectData.phasesData} 
+                    onOpenExportModal={() => setIsExportModalOpen(true)}
+                />
+            )}
             
             {activeTab === 'Project Tracking' && (
                 <ProjectTrackingView 
@@ -913,6 +973,12 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 onClose={() => setIsDownloadModalOpen(false)} 
                 zipBlob={zipBlob} 
                 projectName={projectData.name} 
+            />
+
+            <ProjectExportModal 
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                project={projectData}
             />
         </section>
     );

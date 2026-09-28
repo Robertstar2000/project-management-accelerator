@@ -18,10 +18,12 @@ export const DashboardView: React.FC<{
     projectPhases: Document[]; 
     onAnalyzeRisks: () => void; 
     onGenerateSummary: () => void; 
-    isGeneratingReport: 'risk' | 'summary' | null; 
+    isGeneratingReport: 'risk' | 'summary' | null;
+    onOpenExportModal?: () => void;
 }> = ({ 
     project, isPlanningComplete,
-    onAnalyzeRisks, onGenerateSummary, isGeneratingReport 
+    onAnalyzeRisks, onGenerateSummary, isGeneratingReport,
+    onOpenExportModal
 }) => {
     const { 
         tasks = [], 
@@ -226,11 +228,11 @@ export const DashboardView: React.FC<{
                 </div>
             </div>
 
-            <div className="glass-card widget-ai col-span-3" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <h3 className="subsection-title">AI Engine</h3>
+            <div className="glass-card widget-ai col-span-3" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <h3 className="subsection-title">AI & Export Suite</h3>
                 <button 
                     className="button button-generate" 
-                    style={{ width: '100%', padding: '1.5rem', fontSize: '1rem' }} 
+                    style={{ width: '100%', padding: '1.2rem', fontSize: '0.95rem' }} 
                     onClick={onAnalyzeRisks} 
                     disabled={!!isGeneratingReport}
                 >
@@ -238,12 +240,29 @@ export const DashboardView: React.FC<{
                 </button>
                 <button 
                     className="button button-generate" 
-                    style={{ width: '100%', padding: '1.5rem', fontSize: '1rem' }} 
+                    style={{ width: '100%', padding: '1.2rem', fontSize: '0.95rem' }} 
                     onClick={onGenerateSummary} 
                     disabled={!!isGeneratingReport}
                 >
                     {isGeneratingReport === 'summary' ? 'Synthesizing...' : 'Project Pulse Summary'}
                 </button>
+                {onOpenExportModal && (
+                    <button 
+                        className="button" 
+                        style={{ 
+                            width: '100%', 
+                            padding: '1.2rem', 
+                            fontSize: '0.95rem',
+                            background: 'linear-gradient(135deg, rgba(6,182,212,0.2) 0%, rgba(99,102,241,0.2) 100%)',
+                            border: '1px solid rgba(6,182,212,0.4)',
+                            color: '#06b6d4',
+                            fontWeight: 600
+                        }} 
+                        onClick={onOpenExportModal}
+                    >
+                        Export Summary (PDF/JSON)
+                    </button>
+                )}
                 <div style={{ flexGrow: 1, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
                      <p style={{ fontSize: '0.8rem', color: 'var(--secondary-text)', fontStyle: 'italic', textAlign: 'center' }}>
                         {isPlanningComplete ? 'Workspace Active' : 'Planning Sequence Initiated'}

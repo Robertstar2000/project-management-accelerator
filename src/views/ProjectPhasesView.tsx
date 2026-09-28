@@ -8,7 +8,7 @@ export const ProjectPhasesView = ({ project, projectPhases, phasesData, document
             const defaultOpen = firstTodoDoc ? [firstTodoDoc.id] : (projectPhases.length > 0 ? [projectPhases[0].id] : []);
             const saved = localStorage.getItem(`hmap-open-phases-${project.id}`);
             return saved ? JSON.parse(saved) : defaultOpen;
-        } catch (e) {
+        } catch {
             return [];
         }
     });
@@ -63,9 +63,7 @@ export const ProjectPhasesView = ({ project, projectPhases, phasesData, document
         return { isLocked: false, lockReason: null };
     };
 
-    const isPhase1Complete = documents.filter(d => d.phase === 1).every(d => d.status === 'Approved');
-
-    const [isPlanSelected, setIsPlanSelected] = useState(false);
+    const [isPlanSelected, setIsPlanSelected] = useState(() => project.isPlanSelected || false);
 
     return (
         <div>
