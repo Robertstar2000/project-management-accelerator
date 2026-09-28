@@ -302,7 +302,7 @@ export const ProjectSetupView: React.FC<ProjectSetupViewProps> = ({ onBack, onCr
                                         <div>
                                             <p style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Quick Setup Available</p>
                                             <p style={{ fontSize: '0.85rem', color: 'var(--secondary-text)' }}>
-                                                Based on "{name}", we suggest: {smartDefault.description}
+                                                Based on &quot;{name}&quot;, we suggest: {smartDefault.description}
                                             </p>
                                         </div>
                                         <button type="button" onClick={applySmartDefaults} className="button button-primary" style={{ marginLeft: 'auto', whiteSpace: 'nowrap', fontSize: '0.85rem', padding: '0.5rem 1rem' }}>
@@ -487,7 +487,7 @@ export const ProjectSetupView: React.FC<ProjectSetupViewProps> = ({ onBack, onCr
                                             })}
                                             {Object.keys(filteredAndGrouped.grouped).length === 0 && (
                                                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem', color: 'var(--secondary-text)' }}>
-                                                    No disciplines match "{disciplineSearch}". Try a different search term.
+                                                    No disciplines match &quot;{disciplineSearch}&quot;. Try a different search term.
                                                 </div>
                                             )}
                                         </div>

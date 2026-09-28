@@ -38,6 +38,14 @@ const App = () => {
   // Guard to prevent processing sync events triggered by our own saves
   const isInternalUpdate = useRef(false);
 
+  const handleLogout = async () => {
+    await authService.logout();
+    setCurrentUser(null);
+    setSelectedProjectId(null);
+    setIsSettingUp(false);
+    localStorage.removeItem('hmap-selected-project-id');
+  };
+
   const selectedProject = useMemo(() => {
       if (!selectedProjectId || !projects) return null;
       return projects.find(p => p.id === selectedProjectId) || null;
@@ -338,14 +346,6 @@ const App = () => {
     });
     logAction('Save Project', updatedProject.name, { projectId: updatedProject.id });
   }, [saveProjectsToStorage]);
-
-  const handleLogout = async () => {
-    await authService.logout();
-    setCurrentUser(null);
-    setSelectedProjectId(null);
-    setIsSettingUp(false);
-    localStorage.removeItem('hmap-selected-project-id');
-  };
 
   const handleRequestDeleteProject = (project: Project) => {
     setProjectToDelete(project);
