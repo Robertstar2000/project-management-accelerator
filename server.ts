@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { currentUser, installSecureAuth, type AuthDb } from "./secureAuth.ts";
+import { installEntitlementMiddleware } from "../entitlementMiddleware.mts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -110,6 +111,7 @@ async function startServer() {
     run: async (sql, params = []) => { const r = await db.run(sql, params); return { changes: r.changes, lastID: r.lastID }; },
   };
   await installSecureAuth(app, authDb, 'password');
+  await installEntitlementMiddleware(app, authDb, 'pm', currentUser);
 
   const requireUser = async (req: any, res: any, next: any) => {
     const user = await currentUser(authDb, req);

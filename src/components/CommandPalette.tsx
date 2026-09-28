@@ -112,8 +112,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
         }
     }, [selectedIndex]);
 
-    if (!isOpen) return null;
-
     // Group results
     const groupedResults = useMemo(() => {
         const groups: Record<string, Command[]> = {};
@@ -124,6 +122,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
         });
         return groups;
     }, [filteredCommands]);
+
+    if (!isOpen) return null;
 
     const categoryLabels: Record<string, string> = {
         navigation: 'Navigation',
@@ -188,7 +188,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                 <div ref={listRef} style={{ maxHeight: '400px', overflowY: 'auto', padding: '0.5rem 0' }}>
                     {filteredCommands.length === 0 ? (
                         <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--secondary-text)' }}>
-                            No results found for "{query}"
+                            No results found for &quot;{query}&quot;
                         </div>
                     ) : (
                         Object.entries(groupedResults).map((entry: [string, Command[]]) => {
