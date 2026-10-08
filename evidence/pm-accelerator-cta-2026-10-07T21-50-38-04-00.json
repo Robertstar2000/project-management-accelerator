@@ -1,0 +1,35 @@
+{
+  "verified_at": "2026-10-07T21:50:38-04:00",
+  "target": {
+    "service": "project-management-accelerator",
+    "project": "test-account-64391",
+    "revision": "project-management-accelerator-00004-csz",
+    "url": "https://project-management-accelerator-845075991286.us-west1.run.app/"
+  },
+  "browser_path": {
+    "method": "raw Chrome DevTools Protocol",
+    "endpoint": "http://127.0.0.1:9250",
+    "mode": "non-destructive rendered DOM inspection"
+  },
+  "result": {
+    "page_url": "https://project-management-accelerator-845075991286.us-west1.run.app/",
+    "document_ready_state": "complete",
+    "title": "HMAP Accelerator | MIFECO",
+    "selector": "a[data-test=\"stripe-payment-link-live\"]",
+    "match_count": 1,
+    "ctas": [
+      {
+        "href": "https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03",
+        "text": "Subscribe to Project Accelerator — $49/MO",
+        "outerHTML": "<a href=\"https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03\" target=\"_blank\" rel=\"noopener noreferrer\" data-test=\"stripe-payment-link-live\" style=\"display: inline-block; padding: 1rem 2.5rem; font-size: 1.1rem; text-align: center; background: linear-gradient(90deg, rgb(139, 92, 246), rgb(245, 158, 11)); border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; color: rgb(255, 255, 255); border-radius: 0.9rem; font-weight: 800;\">Subscribe to Project Accelerator — $49/MO</a>"
+      }
+    ]
+  },
+  "mutations": {
+    "source_changed": false,
+    "stripe_settings_changed": false,
+    "deployment_triggered": false,
+    "outbound_settings_changed": false
+  },
+  "status": "verified"
+}

@@ -1,0 +1,31 @@
+{
+  "verified_at": "2026-10-07T21:49:56-04:00",
+  "target": {
+    "service": "project-management-accelerator",
+    "project": "test-account-64391",
+    "revision": "project-management-accelerator-00004-csz",
+    "url": "https://project-management-accelerator-845075991286.us-west1.run.app/"
+  },
+  "browser_path": {
+    "method": "raw Chrome DevTools Protocol",
+    "endpoint": "http://127.0.0.1:9250",
+    "mode": "non-destructive rendered DOM inspection"
+  },
+  "result": {
+    "page_url": "https://project-management-accelerator-845075991286.us-west1.run.app/",
+    "document_ready_state": "complete",
+    "title": "HMAP Accelerator | MIFECO",
+    "selector": "a[data-test=\"stripe-payment-link-live\"]",
+    "match_count": 1,
+    "href": "https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03",
+    "text": "Subscribe to Project Accelerator — $49/MO",
+    "rendered_outer_html": "<a href=\"https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03\" target=\"_blank\" rel=\"noopener noreferrer\" data-test=\"stripe-payment-link-live\">Subscribe to Project Accelerator — $49/MO</a>"
+  },
+  "mutations": {
+    "source_changed": false,
+    "stripe_settings_changed": false,
+    "deployment_triggered": false,
+    "outbound_settings_changed": false
+  },
+  "status": "verified"
+}
