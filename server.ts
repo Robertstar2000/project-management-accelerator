@@ -8,7 +8,7 @@ import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { currentUser, installSecureAuth, type AuthDb } from "./secureAuth.ts";
-import { installEntitlementMiddleware } from "../entitlementMiddleware.mts";
+import { installEntitlementMiddleware } from "./entitlementMiddleware.mts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,25 +78,66 @@ async function startServer() {
     );
   `);
 
-  // Lightweight liveness/readiness endpoint for deployment probes.
-  app.get("/health", async (_req, res) => {
+  // Public health contract. Keep these routes above auth and entitlement middleware.
+  // They are intentionally dependency-aware so a broken DB/storage reports 503.
+  const healthPaths = [
+    "/health",
+    "/api/health",
+    "/status",
+    "/api/status",
+    "/healthz",
+    "/api/healthz",
+    "/ping",
+    "/livez",
+    "/readyz",
+  ];
+  const healthHeaders = (res: any, status: string) => res.set({
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+    "X-Health-Status": status,
+  });
+  const healthReport = async () => {
+    const checks: Record<string, "ok" | "error"> = { database: "ok", storage: "ok" };
     try {
       await db.get("SELECT 1 AS ok");
-      res.status(200).json({ status: "ok", service: "pm-accelerator" });
     } catch (error) {
-      console.error("Health check failed:", error);
-      res.status(503).json({ status: "error", service: "pm-accelerator" });
+      checks.database = "error";
+      console.error("Health database check failed:", error);
     }
-  });
-  app.get("/api/health", async (_req, res) => {
+    const storagePath = path.join(__dirname, "artifacts");
+    const probePath = path.join(storagePath, `.health-${process.pid}`);
     try {
-      await db.get("SELECT 1 AS ok");
-      res.status(200).json({ status: "ok", service: "pm-accelerator" });
+      await fs.mkdir(storagePath, { recursive: true });
+      await fs.writeFile(probePath, "ok");
+      await fs.unlink(probePath);
     } catch (error) {
-      console.error("API health check failed:", error);
-      res.status(503).json({ status: "error", service: "pm-accelerator" });
+      checks.storage = "error";
+      console.error("Health storage check failed:", error);
+      try { await fs.unlink(probePath); } catch { /* probe may not have been created */ }
     }
+    const status = Object.values(checks).every((check) => check === "ok") ? "ok" : "error";
+    return {
+      status,
+      service: "pm-accelerator",
+      checks,
+      timestamp: new Date().toISOString(),
+    };
+  };
+  const sendHealth = async (_req: any, res: any) => {
+    const report = await healthReport();
+    healthHeaders(res, report.status);
+    return res.status(report.status === "ok" ? 200 : 503).json(report);
+  };
+  app.options(healthPaths, (_req, res) => {
+    healthHeaders(res, "ok");
+    return res.sendStatus(204);
   });
+  app.head(healthPaths, sendHealth);
+  app.get(healthPaths, sendHealth);
 
   try {
     await db.exec(`ALTER TABLE users ADD COLUMN geminiKey TEXT;`);
