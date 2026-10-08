@@ -24,14 +24,35 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleEsc);
+    }
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{maxWidth: '800px'}} onClick={(e) => e.stopPropagation()} ref={modalRef} tabIndex={-1}>
+      <div
+        className="modal-content"
+        style={{maxWidth: '800px'}}
+        onClick={(e) => e.stopPropagation()}
+        ref={modalRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mission-database-title"
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', borderBottom: '1px solid var(--card-border)', paddingBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '2.4rem' }}>Mission Database</h2>
-            <button className="button-close" onClick={onClose}>&times;</button>
+            <h2 id="mission-database-title" style={{ fontSize: '2.4rem' }}>Mission Database</h2>
+            <button className="button-close" onClick={onClose} aria-label="Close modal">&times;</button>
         </div>
 
         <div className="project-list-section">
@@ -45,8 +66,8 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({
                                 <span className="chip-blue">{p.discipline}</span>
                             </div>
                             <div style={{display: 'flex', gap: '1rem'}}>
-                                <button onClick={() => onSelectProject(p)} className="button button-primary">Open</button>
-                                <button onClick={() => onRequestDelete(p)} className="button button-danger">Delete</button>
+                                <button onClick={() => onSelectProject(p)} className="button button-primary" aria-label={`Open project ${p.name}`}>Open</button>
+                                <button onClick={() => onRequestDelete(p)} className="button button-danger" aria-label={`Delete project ${p.name}`}>Delete</button>
                             </div>
                         </li>
                     ))}
