@@ -69,12 +69,11 @@ export const ProjectSetupView: React.FC<ProjectSetupViewProps> = ({ onBack, onCr
                 };
                 
                 const response = await ai.models.generateContent({
-                    model: 'gemini-3-flash-preview', 
+                    model: 'gemini-3.8-flash', 
                     contents: prompt, 
                     config: { 
                         responseMimeType: "application/json", 
-                        responseSchema: schema,
-                        thinkingConfig: { thinkingBudget: 0 }
+                        responseSchema: schema
                     },
                 });
 

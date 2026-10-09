@@ -1,6 +1,16 @@
-import { getActiveLlmConfig } from './llmStorage';
+import { getActiveLlmConfig, getEffectiveModelForProvider } from './llmStorage';
 import { ProviderConfig } from '../types';
 
+const cleanJsonFences = (text: string): string => {
+    if (!text) return '';
+    let trimmed = text.trim();
+    if (trimmed.startsWith('```json')) {
+        trimmed = trimmed.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+    } else if (trimmed.startsWith('```')) {
+        trimmed = trimmed.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    return trimmed.trim();
+};
 
 export interface GenerateOptions {
     model?: string;
@@ -74,7 +84,11 @@ export const testLlmConnection = async (config: ProviderConfig): Promise<{
 
 export const executeLlmGeneration = async (options: GenerateOptions): Promise<GenerateResult> => {
     const activeConfig = getActiveLlmConfig();
-    const effectiveModel = options.model || activeConfig.model;
+    const effectiveModel = getEffectiveModelForProvider(
+        activeConfig.provider,
+        options.model,
+        activeConfig.model
+    );
 
     // Send through server proxy to bypass browser CORS and securely handle all providers
     const res = await fetch('/api/llm/generate', {
@@ -98,12 +112,17 @@ export const executeLlmGeneration = async (options: GenerateOptions): Promise<Ge
     }
 
     const data = await res.json();
+    let text = data.text || '';
+    if (options.config?.responseMimeType === 'application/json') {
+        text = cleanJsonFences(text);
+    }
+
     return {
-        text: data.text || '',
+        text,
         candidates: data.candidates || [
             {
                 content: {
-                    parts: [{ text: data.text || '' }]
+                    parts: [{ text }]
                 }
             }
         ],

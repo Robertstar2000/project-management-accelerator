@@ -7,13 +7,13 @@ import type { Tier } from './tiers';
 
 /** Stripe Payment Link for Pro – Monthly */
 export const STRIPE_PAYMENT_LINK_MONTHLY =
-  import.meta.env?.STRIPE_PAYMENT_LINK_MONTHLY ??
-  'https://buy.stripe.com/test_placeholder_monthly';
+  import.meta.env?.VITE_STRIPE_PAYMENT_LINK_MONTHLY ??
+  'https://buy.stripe.com/test_pm_accelerator_business';
 
 /** Stripe Payment Link for Pro – Annual */
 export const STRIPE_PAYMENT_LINK_ANNUAL =
-  import.meta.env?.STRIPE_PAYMENT_LINK_ANNUAL ??
-  'https://buy.stripe.com/test_placeholder_annual';
+  import.meta.env?.VITE_STRIPE_PAYMENT_LINK_ANNUAL ??
+  'https://buy.stripe.com/test_pm_accelerator_business';
 
 export type BillingCycle = 'monthly' | 'annual';
 

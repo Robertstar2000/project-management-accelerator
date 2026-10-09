@@ -3,6 +3,7 @@ import { Type } from "@google/genai";
 import { logAction } from '../utils/logging';
 import { PROMPTS } from '../constants/projectData';
 import { ChangeDeploymentModal } from '../components/ChangeDeploymentModal';
+import { DependencyImpactVisualizer } from '../components/DependencyImpactVisualizer';
 import { parseImpact, applyImpact } from '../utils/be-logic';
 import { getGeminiClient } from '../utils/geminiClient';
 
@@ -70,7 +71,7 @@ export const RevisionControlView = ({ project, onUpdateProject }: {project: any,
                 required: ['days', 'cost']
             };
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: "application/json", responseSchema: schema },
+                model: 'gemini-3.8-flash', contents: prompt, config: { responseMimeType: "application/json", responseSchema: schema },
             });
             const impact = JSON.parse(response.text);
             const newImpactStr = `${impact.days >= 0 ? '+' : ''}${impact.days}d ${impact.cost >= 0 ? '+' : ''}${impact.cost}c`;
@@ -100,7 +101,7 @@ export const RevisionControlView = ({ project, onUpdateProject }: {project: any,
             logAction('Generate Change Plan', name, { promptLength: prompt.length });
             
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: 'gemini-3.8-flash',
                 contents: prompt,
             });
 
@@ -244,6 +245,10 @@ ${cr.reason}
                 </div>
             </div>
             
+            <div style={{borderTop: '1px solid var(--border-color)', marginTop: '2.5rem', paddingTop: '2rem'}}>
+                <DependencyImpactVisualizer project={project} />
+            </div>
+
             <div style={{borderTop: '1px solid var(--border-color)', marginTop: '2rem', paddingTop: '2rem'}}>
                 <h3 className="subsection-title">Change Deployment</h3>
                 <div className="form-group">

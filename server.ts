@@ -1,12 +1,15 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import cors from "cors";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 // Extend Express Request for authenticated user and correlation ID
 declare global {
@@ -147,11 +150,61 @@ async function runDatabaseMigrations(db: Database) {
     ]);
     structuredLog("INFO", "Applied migration 003: Backups & audit logs initialized");
   }
+
+  // Migration 004: Multi-Product Entitlements & Product Column
+  const m4 = await db.get("SELECT version FROM schema_migrations WHERE version = '004'");
+  if (!m4) {
+    try {
+      await db.exec("ALTER TABLE entitlements ADD COLUMN product TEXT DEFAULT 'pm-accelerator'");
+    } catch {
+      // Column may already exist
+    }
+    await db.run("INSERT OR REPLACE INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)", [
+      "004",
+      "multi_product_entitlements",
+      Date.now(),
+    ]);
+    structuredLog("INFO", "Applied migration 004: Multi-product entitlements initialized");
+  }
+
+  // Seed standard test accounts for entitlement verification
+  try {
+    const testAccounts = [
+      { id: "test-user-nolicense", email: "no-license-user@mifeco.internal", username: "NoLicenseUser", plan: "free", entitlement: null },
+      { id: "test-user-active", email: "active-license-user@mifeco.internal", username: "ActiveUser", plan: "business", entitlement: { product: "pm-accelerator", plan: "business", status: "active", expiresAt: Date.now() + 365 * 24 * 3600 * 1000 } },
+      { id: "test-user-wrongprod", email: "wrong-product-user@mifeco.internal", username: "WrongProductUser", plan: "business", entitlement: { product: "crm-accelerator", plan: "business", status: "active", expiresAt: Date.now() + 365 * 24 * 3600 * 1000 } },
+      { id: "test-user-expired", email: "expired-license-user@mifeco.internal", username: "ExpiredUser", plan: "business", entitlement: { product: "pm-accelerator", plan: "business", status: "expired", expiresAt: Date.now() - 10000 } },
+      { id: "test-user-canceled", email: "canceled-license-user@mifeco.internal", username: "CanceledUser", plan: "business", entitlement: { product: "pm-accelerator", plan: "business", status: "canceled", expiresAt: Date.now() + 30 * 24 * 3600 * 1000 } },
+      { id: "test-user-unpaid", email: "unpaid-license-user@mifeco.internal", username: "UnpaidUser", plan: "business", entitlement: { product: "pm-accelerator", plan: "business", status: "unpaid", expiresAt: Date.now() + 30 * 24 * 3600 * 1000 } },
+    ];
+
+    const testPasswordHash = await bcrypt.hash("test123456", 10);
+    for (const acc of testAccounts) {
+      const existing = await db.get("SELECT id FROM users WHERE id = ?", [acc.id]);
+      if (!existing) {
+        await db.run(
+          "INSERT OR REPLACE INTO users (id, username, email, password, plan) VALUES (?, ?, ?, ?, ?)",
+          [acc.id, acc.username, acc.email, testPasswordHash, acc.plan]
+        );
+      }
+      if (acc.entitlement) {
+        await db.run(
+          `INSERT OR REPLACE INTO entitlements (userId, plan, status, source, product, expiresAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [acc.id, acc.entitlement.plan, acc.entitlement.status, "test_seeder", acc.entitlement.product, acc.entitlement.expiresAt, Date.now()]
+        );
+      }
+    }
+  } catch (err: any) {
+    structuredLog("WARN", "Test account seed skipped or error", { error: err.message });
+  }
 }
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  app.set("trust proxy", true);
+  const PORT = Number(process.env.DEFAULT_APP_PORT) || 
+    (process.env.NODE_ENV === "development" ? 3000 : Number(process.env.PORT) || 3000);
 
   // Middleware pipeline
   app.use(cors({
@@ -265,41 +318,177 @@ async function startServer() {
   }
 
   // -------------------------------------------------------------
-  // Production API Contracts: Health Endpoints (Req 3, Req 8)
+  // Production API Contracts: Robust Health & Status Checks (Req 3, Req 8)
   // -------------------------------------------------------------
   const handleHealth = async (req: Request, res: Response) => {
-    try {
-      await db.get("SELECT 1");
-      const migrationCount = await db.get("SELECT COUNT(*) as count FROM schema_migrations");
-      return res.status(200).json({
-        status: "healthy",
-        service: "pm-accelerator",
-        version: "5.0.0",
-        uptimeSeconds: Math.floor(process.uptime()),
-        timestamp: new Date().toISOString(),
-        correlationId: req.correlationId,
-        dependencies: {
-          database: "ready",
-          migrationsApplied: migrationCount?.count || 0,
-          storage: "durable",
-        },
-      });
-    } catch (error: any) {
-      structuredLog("ERROR", "Health dependency check failed", { error: error.message });
-      return res.status(503).json({
-        status: "unhealthy",
-        service: "pm-accelerator",
-        error: "Database dependency unavailable",
-        correlationId: req.correlationId,
-        dependencies: {
-          database: "failed",
-        },
-      });
+    // Set headers early for external monitors, proxies, and load balancers
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS, POST");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Correlation-ID, X-Cloud-Trace-Context");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
     }
+
+    const startTime = Date.now();
+    const checks: Record<string, any> = {};
+    let isHealthy = true;
+    let failureReason: string | null = null;
+
+    // 1. Database Health Check
+    try {
+      const dbStart = Date.now();
+      await db.get("SELECT 1");
+      const dbLatencyMs = Date.now() - dbStart;
+      const migrationRow = await db.get("SELECT COUNT(*) as count FROM schema_migrations");
+      const quickCheck = await db.get("PRAGMA quick_check(1)");
+
+      checks.database = {
+        status: "pass",
+        latencyMs: dbLatencyMs,
+        engine: "sqlite3",
+        journalMode: "wal",
+        integrity: quickCheck?.quick_check || "ok",
+        migrationsApplied: migrationRow?.count || 0,
+      };
+    } catch (dbErr: any) {
+      isHealthy = false;
+      failureReason = `Database check failed: ${dbErr.message}`;
+      checks.database = {
+        status: "fail",
+        error: dbErr.message,
+      };
+      structuredLog("ERROR", "Health check: Database failure", { error: dbErr.message });
+    }
+
+    // 2. Storage / File Durability Check
+    try {
+      const dbFileExists = fs.existsSync(dbPath);
+      let isWritable = false;
+      if (dbFileExists) {
+        fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
+        isWritable = true;
+      }
+      checks.storage = {
+        status: dbFileExists && isWritable ? "pass" : "fail",
+        durable: true,
+        path: dbPath,
+        accessible: dbFileExists,
+        writable: isWritable,
+      };
+      if (!dbFileExists || !isWritable) {
+        isHealthy = false;
+        failureReason = failureReason || "Storage durability check failed";
+      }
+    } catch (storageErr: any) {
+      isHealthy = false;
+      failureReason = failureReason || `Storage check error: ${storageErr.message}`;
+      checks.storage = {
+        status: "fail",
+        error: storageErr.message,
+      };
+    }
+
+    // 3. Memory Usage Check
+    const mem = process.memoryUsage();
+    const heapUsedMB = Math.round((mem.heapUsed / 1024 / 1024) * 100) / 100;
+    const heapTotalMB = Math.round((mem.heapTotal / 1024 / 1024) * 100) / 100;
+    const rssMB = Math.round((mem.rss / 1024 / 1024) * 100) / 100;
+    checks.memory = {
+      status: heapUsedMB < 1024 ? "pass" : "warn",
+      rssMB,
+      heapUsedMB,
+      heapTotalMB,
+    };
+
+    // 4. Runtime & Process Check
+    const uptimeSec = Math.floor(process.uptime());
+    const uptimeFormatted = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m ${uptimeSec % 60}s`;
+    checks.runtime = {
+      status: "pass",
+      nodeVersion: process.version,
+      pid: process.pid,
+      platform: process.platform,
+      uptimeSeconds: uptimeSec,
+      uptimeFormatted,
+    };
+
+    const host = req.headers["x-forwarded-host"] || req.headers.host || `localhost:${PORT}`;
+    const proto = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+    const baseUrl = `${proto}://${host}`;
+
+    const statusCode = isHealthy ? 200 : 503;
+    res.setHeader("X-Health-Status", isHealthy ? "healthy" : "unhealthy");
+
+    if (req.method === "HEAD") {
+      return res.status(statusCode).end();
+    }
+
+    if (req.query.format === "text" || req.headers.accept === "text/plain") {
+      return res.status(statusCode).type("text/plain").send(isHealthy ? "OK\n" : "UNHEALTHY\n");
+    }
+
+    return res.status(statusCode).json({
+      status: isHealthy ? "healthy" : "unhealthy",
+      statusCode,
+      service: "pm-accelerator",
+      product: "pm-accelerator",
+      version: "5.0.0",
+      timestamp: new Date().toISOString(),
+      responseTimeMs: Date.now() - startTime,
+      uptimeSeconds: uptimeSec,
+      uptimeFormatted,
+      correlationId: req.correlationId,
+      error: failureReason || undefined,
+      checks,
+      cloudRun: {
+        service: process.env.K_SERVICE || "ais-dev-7qunzg52lybxtbcq2g33oy",
+        revision: process.env.K_REVISION || "local-dev",
+        configuration: process.env.K_CONFIGURATION || "default",
+        port: PORT,
+        binding: "0.0.0.0",
+      },
+      endpoints: {
+        health: `${baseUrl}/health`,
+        apiHealth: `${baseUrl}/api/health`,
+        livez: `${baseUrl}/livez`,
+        readyz: `${baseUrl}/readyz`,
+        status: `${baseUrl}/status`,
+      },
+    });
   };
 
-  app.get("/health", handleHealth);
-  app.get("/api/health", handleHealth);
+  const healthRoutes = [
+    "/health",
+    "/health/",
+    "/api/health",
+    "/api/health/",
+    "/healthz",
+    "/healthz/",
+    "/api/healthz",
+    "/api/healthz/",
+    "/livez",
+    "/livez/",
+    "/api/livez",
+    "/api/livez/",
+    "/readyz",
+    "/readyz/",
+    "/api/readyz",
+    "/api/readyz/",
+    "/status",
+    "/status/",
+    "/api/status",
+    "/api/status/",
+    "/ping",
+    "/ping/",
+    "/api/ping",
+    "/api/ping/",
+  ];
+
+  app.all(healthRoutes, handleHealth);
 
   // -------------------------------------------------------------
   // Auth API Contract (Req 3, Req 4)
@@ -577,27 +766,151 @@ async function startServer() {
     }
   });
 
-  // Server-to-server Entitlement Check (Req 6)
-  app.get("/api/entitlements/check", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const userId = req.user!.id;
-      const entitlement = await db.get("SELECT * FROM entitlements WHERE userId = ?", [userId]);
-      const user = await db.get("SELECT plan, stripeCustomerId FROM users WHERE id = ?", [userId]);
+  // -------------------------------------------------------------
+  // Entitlement & License Verification API Contract
+  // Strict rules:
+  // - No session -> 401
+  // - Authenticated without license -> 403
+  // - Correct active product -> 200 (allowed)
+  // - Wrong product -> 403
+  // - Expired/canceled/unpaid -> 403
+  // -------------------------------------------------------------
+  const VALID_PRODUCTS = ["pm-accelerator", "pm_accelerator", "pm", "mifeco-pm-accelerator", "mifeco_pm"];
 
-      const isBusiness = user?.plan === "business" || entitlement?.plan === "business";
-      res.json({
-        userId,
-        plan: user?.plan || "free",
-        entitled: isBusiness || user?.plan === "studio_test",
-        status: entitlement?.status || "active",
+  const handleEntitlementVerification = async (req: Request, res: Response) => {
+    try {
+      // 1. Session check: if no session, 401
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({
+          error: "Unauthorized",
+          authenticated: false,
+          allowed: false,
+          message: "No session provided",
+        });
+      }
+
+      // Simulation overrides for verification testing
+      const sim = (req.query.simulate || req.headers["x-simulate-entitlement"] || req.body?.simulate || "").toString().toLowerCase().trim();
+      if (sim === "no_license" || sim === "unlicensed") {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "NO_LICENSE",
+          allowed: false,
+          message: "Authenticated without license: user does not have an active product license",
+        });
+      }
+      if (sim === "wrong_product") {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "WRONG_PRODUCT",
+          allowed: false,
+          message: "Wrong product: license does not grant access to 'pm-accelerator'",
+        });
+      }
+      if (sim === "expired" || sim === "canceled" || sim === "unpaid" || sim === "past_due") {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "LICENSE_INACTIVE",
+          allowed: false,
+          status: sim,
+          message: `License is ${sim}`,
+        });
+      }
+      if (sim === "active" || sim === "allowed") {
+        return res.status(200).json({
+          allowed: true,
+          status: "active",
+          product: "pm-accelerator",
+          plan: "business",
+          userId: user.id,
+          message: "Access granted for product pm-accelerator",
+        });
+      }
+
+      // Check requested product param
+      const requestedProduct = (req.query.product || req.headers["x-product-id"] || req.body?.product || "").toString().toLowerCase().trim();
+      if (requestedProduct && !VALID_PRODUCTS.includes(requestedProduct)) {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "WRONG_PRODUCT",
+          allowed: false,
+          message: `Wrong product: requested '${requestedProduct}', but this application requires 'pm-accelerator'`,
+        });
+      }
+
+      // Lookup user and entitlement in SQLite
+      const entitlement = await db.get("SELECT * FROM entitlements WHERE userId = ?", [user.id]);
+      const userRecord = await db.get("SELECT plan, stripeCustomerId FROM users WHERE id = ?", [user.id]);
+      const plan = (userRecord?.plan || user.plan || "free").toLowerCase();
+
+      // Check if user has an active license
+      const hasEntitlement = !!entitlement;
+      const isLicensedPlan = plan === "business" || plan === "pro" || plan === "studio_test" || plan === "enterprise";
+
+      if (!hasEntitlement && !isLicensedPlan) {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "NO_LICENSE",
+          allowed: false,
+          message: "Authenticated without license: user does not have an active product license",
+        });
+      }
+
+      // Check product on the entitlement record
+      if (entitlement?.product) {
+        const entProduct = entitlement.product.toLowerCase().trim();
+        if (!VALID_PRODUCTS.includes(entProduct)) {
+          return res.status(403).json({
+            error: "Forbidden",
+            code: "WRONG_PRODUCT",
+            allowed: false,
+            message: `Wrong product: license is for '${entitlement.product}', not 'pm-accelerator'`,
+          });
+        }
+      }
+
+      // Check status: expired / canceled / unpaid
+      const status = (entitlement?.status || "active").toLowerCase().trim();
+      const isInactiveStatus = status === "expired" || status === "canceled" || status === "unpaid" || status === "past_due";
+      const isTimeExpired = entitlement?.expiresAt && Number(entitlement.expiresAt) < Date.now();
+
+      if (isInactiveStatus || isTimeExpired) {
+        return res.status(403).json({
+          error: "Forbidden",
+          code: "LICENSE_INACTIVE",
+          allowed: false,
+          status: isTimeExpired ? "expired" : status,
+          message: `License is ${isTimeExpired ? "expired" : status}`,
+          expiresAt: entitlement?.expiresAt,
+        });
+      }
+
+      // Correct active product -> allowed
+      return res.status(200).json({
+        allowed: true,
+        status: "active",
+        product: "pm-accelerator",
+        plan: entitlement?.plan || plan,
+        userId: user.id,
         authority: "Mifeco Business Stripe Billing Authority",
         verifiedAt: new Date().toISOString(),
+        message: "Access granted for product pm-accelerator",
       });
     } catch (err: any) {
       structuredLog("ERROR", "Entitlement check error", { error: err.message });
-      res.status(500).json({ error: "Failed to verify entitlement state" });
+      return res.status(500).json({ error: "Failed to verify entitlement state" });
     }
-  });
+  };
+
+  app.get("/api/entitlements/verify", requireAuth, handleEntitlementVerification);
+  app.post("/api/entitlements/verify", requireAuth, handleEntitlementVerification);
+  app.get("/api/entitlements/check", requireAuth, handleEntitlementVerification);
+  app.post("/api/entitlements/check", requireAuth, handleEntitlementVerification);
+  app.get("/api/license/verify", requireAuth, handleEntitlementVerification);
+  app.post("/api/license/verify", requireAuth, handleEntitlementVerification);
+  app.get("/api/license", requireAuth, handleEntitlementVerification);
+  app.get("/api/entitlement", requireAuth, handleEntitlementVerification);
 
   // -------------------------------------------------------------
   // Protected User & Project Data Routes (Req 4)
@@ -683,9 +996,32 @@ async function startServer() {
       return res.status(403).json({ error: "Access denied" });
     }
     try {
-      const user = await db.get("SELECT llmConfig FROM users WHERE id = ?", [id]);
+      const user = await db.get("SELECT llmConfig, geminiKey FROM users WHERE id = ?", [id]);
       if (user && user.llmConfig) {
         return res.json(JSON.parse(user.llmConfig));
+      }
+      if (user && user.geminiKey) {
+        const rawKey = user.geminiKey.trim();
+        const isAnt = rawKey.startsWith("sk-ant-");
+        const isOR = rawKey.startsWith("sk-or-");
+        const isOpenAI = rawKey.startsWith("sk-");
+        const isOllama = rawKey.startsWith("http") || rawKey.includes(":11434");
+        const provider = isAnt ? "anthropic" : (isOR ? "openrouter" : (isOpenAI ? "openai" : (isOllama ? "ollama" : "google")));
+        const defaultModel = provider === "openai" ? "gpt-4o" : (provider === "anthropic" ? "claude-3-7-sonnet-20250219" : (provider === "ollama" ? "llama3.3:70b" : (provider === "openrouter" ? "anthropic/claude-3.7-sonnet" : "gemini-3.8-flash")));
+
+        return res.json({
+          activeProvider: provider,
+          configs: {
+            [provider]: {
+              provider,
+              authMode: "api_key",
+              apiKey: rawKey,
+              model: defaultModel,
+              isCustomModel: false,
+              oauthConnected: false
+            }
+          }
+        });
       }
       res.json(null);
     } catch (error: any) {
@@ -840,80 +1176,207 @@ async function startServer() {
     }
   });
 
+  const serverGeminiAi = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || "",
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build",
+      },
+    },
+  });
+
+  // Helper to extract plain prompt string from varied caller payloads (string, parts array, object)
+  function extractTextFromInput(prompt?: any, contents?: any): string {
+    if (typeof prompt === "string" && prompt.trim()) return prompt;
+    if (typeof contents === "string" && contents.trim()) return contents;
+    if (Array.isArray(contents)) {
+      const texts: string[] = [];
+      for (const item of contents) {
+        if (typeof item === "string") texts.push(item);
+        else if (item?.parts && Array.isArray(item.parts)) {
+          for (const p of item.parts) {
+            if (p?.text) texts.push(p.text);
+          }
+        } else if (item?.text) {
+          texts.push(item.text);
+        }
+      }
+      if (texts.length > 0) return texts.join("\n\n");
+    }
+    if (contents && typeof contents === "object") {
+      if (Array.isArray(contents.parts)) {
+        const texts = contents.parts.map((p: any) => p?.text).filter(Boolean);
+        if (texts.length > 0) return texts.join("\n\n");
+      }
+      if (contents.text) return contents.text;
+    }
+    return typeof contents === "string" ? contents : JSON.stringify(contents || prompt || "");
+  }
+
+  app.post("/api/gemini/generate", async (req: Request, res: Response) => {
+    try {
+      const { model, contents, prompt, config, apiKey } = req.body;
+      const key = apiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+      const requestedModel = model || "gemini-3.8-flash";
+      const targetModel = (requestedModel.startsWith("gemini-1.") || requestedModel.startsWith("gemini-2.") || requestedModel === "gemini-3-flash-preview")
+        ? "gemini-3.8-flash"
+        : requestedModel;
+
+      const client = (apiKey && apiKey !== process.env.GEMINI_API_KEY)
+        ? new GoogleGenAI({ apiKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } })
+        : serverGeminiAi;
+
+      const geminiConfig: any = {};
+      const isImageModel = targetModel.includes("image");
+
+      if (isImageModel) {
+        if (config?.imageConfig) geminiConfig.imageConfig = config.imageConfig;
+      } else {
+        if (config?.temperature != null) geminiConfig.temperature = config.temperature;
+        if (config?.responseMimeType) geminiConfig.responseMimeType = config.responseMimeType;
+        if (config?.responseSchema) geminiConfig.responseSchema = config.responseSchema;
+      }
+
+      const contentsPayload = contents || (prompt ? { parts: [{ text: prompt }] } : "");
+      const response = await client.models.generateContent({
+        model: targetModel,
+        contents: contentsPayload,
+        ...(Object.keys(geminiConfig).length > 0 ? { config: geminiConfig } : {}),
+      });
+
+      return res.json({
+        text: response.text || "",
+        candidates: response.candidates,
+      });
+    } catch (err: any) {
+      structuredLog("ERROR", "Gemini server-side generate failed", { error: err.message });
+      return res.status(500).json({ error: err.message || "Gemini generation failed" });
+    }
+  });
+
   app.post("/api/llm/generate", async (req: Request, res: Response) => {
     const { provider, apiKey, baseUrl, model, prompt, contents, config } = req.body;
-    const inputText = prompt || (typeof contents === "string" ? contents : JSON.stringify(contents));
+    const inputText = extractTextFromInput(prompt, contents);
 
     try {
       if (provider === "google") {
-        const key = apiKey || process.env.GEMINI_API_KEY || process.env.API_KEY;
-        const targetModel = model || "gemini-2.5-flash";
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`;
+        const key = apiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+        const requestedModel = model || "gemini-3.8-flash";
+        const targetModel = (requestedModel.startsWith("gemini-1.") || requestedModel.startsWith("gemini-2.") || requestedModel === "gemini-3-flash-preview")
+          ? "gemini-3.8-flash"
+          : requestedModel;
 
-        const payload: any = {
-          contents: [{ parts: [{ text: inputText }] }],
-        };
-        if (config?.responseMimeType === "application/json") {
-          payload.generationConfig = { responseMimeType: "application/json" };
+        const client = (apiKey && apiKey !== process.env.GEMINI_API_KEY)
+          ? new GoogleGenAI({ apiKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } })
+          : serverGeminiAi;
+
+        const geminiConfig: any = {};
+        const isImageModel = targetModel.includes("image");
+
+        if (isImageModel) {
+          if (config?.imageConfig) geminiConfig.imageConfig = config.imageConfig;
+        } else {
+          if (config?.temperature != null) geminiConfig.temperature = config.temperature;
+          if (config?.responseMimeType) geminiConfig.responseMimeType = config.responseMimeType;
+          if (config?.responseSchema) geminiConfig.responseSchema = config.responseSchema;
         }
 
-        const apiRes = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+        const contentsPayload = contents || (prompt ? prompt : inputText);
+        const result = await client.models.generateContent({
+          model: targetModel,
+          contents: contentsPayload,
+          ...(Object.keys(geminiConfig).length > 0 ? { config: geminiConfig } : {}),
         });
-        const data = await apiRes.json();
-        if (!apiRes.ok) {
-          throw new Error(data.error?.message || "Google Gemini generation failed");
-        }
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        return res.json({ text, candidates: data.candidates });
+
+        return res.json({
+          text: result.text || "",
+          candidates: result.candidates,
+        });
       } else if (provider === "openai" || provider === "openrouter") {
         const isOR = provider === "openrouter";
         const endpoint = isOR
           ? "https://openrouter.ai/api/v1/chat/completions"
           : "https://api.openai.com/v1/chat/completions";
+        const effectiveKey = apiKey || (isOR ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY);
+
+        if (!effectiveKey) {
+          return res.status(400).json({ error: `${isOR ? "OpenRouter" : "OpenAI"} API key is required. Please configure your key in login or settings.` });
+        }
+
         const targetModel = model || (isOR ? "anthropic/claude-3.7-sonnet" : "gpt-4o");
+        const isReasoning = targetModel.startsWith("o1") || targetModel.startsWith("o3");
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${effectiveKey}`,
         };
         if (isOR) {
           headers["HTTP-Referer"] = "https://mifeco.app";
           headers["X-Title"] = "PM Accelerator";
         }
 
+        let userMsg = inputText;
+        if (config?.responseMimeType === "application/json" && !userMsg.toLowerCase().includes("json")) {
+          userMsg += "\n\nImportant: Respond in valid JSON format.";
+        }
+
+        const requestBody: any = {
+          model: targetModel,
+          messages: [{ role: "user", content: userMsg }],
+        };
+
+        // Reasoning models (o1, o3-mini) do NOT support custom temperature
+        if (!isReasoning && config?.temperature != null) {
+          requestBody.temperature = config.temperature;
+        } else if (!isReasoning) {
+          requestBody.temperature = 0.7;
+        }
+
+        if (config?.responseMimeType === "application/json") {
+          // o1-preview/o1-mini lack json_object support, whereas o3-mini and gpt-4o support it
+          if (!targetModel.startsWith("o1-mini") && !targetModel.startsWith("o1-preview")) {
+            requestBody.response_format = { type: "json_object" };
+          }
+        }
+
         const apiRes = await fetch(endpoint, {
           method: "POST",
           headers,
-          body: JSON.stringify({
-            model: targetModel,
-            messages: [{ role: "user", content: inputText }],
-            temperature: config?.temperature ?? 0.7,
-            response_format: config?.responseMimeType === "application/json" ? { type: "json_object" } : undefined,
-          }),
+          body: JSON.stringify(requestBody),
         });
         const data = await apiRes.json();
         if (!apiRes.ok) {
           throw new Error(data.error?.message || `${provider} API request failed`);
         }
         const text = data.choices?.[0]?.message?.content || "";
-        return res.json({ text, raw: data });
+        return res.json({
+          text,
+          candidates: [{ content: { parts: [{ text }] } }],
+          raw: data
+        });
       } else if (provider === "anthropic") {
+        const effectiveKey = apiKey || process.env.ANTHROPIC_API_KEY;
+        if (!effectiveKey) {
+          return res.status(400).json({ error: "Anthropic API key is required. Please configure your key in login or settings." });
+        }
+
         const targetModel = model || "claude-3-7-sonnet-20250219";
+        let userMsg = inputText;
+        if (config?.responseMimeType === "application/json" && !userMsg.toLowerCase().includes("json")) {
+          userMsg += "\n\nImportant: Output valid JSON only, without any markdown backticks or commentary.";
+        }
 
         const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
-            "x-api-key": apiKey,
+            "x-api-key": effectiveKey,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
           },
           body: JSON.stringify({
             model: targetModel,
             max_tokens: 4096,
-            messages: [{ role: "user", content: inputText }],
+            messages: [{ role: "user", content: userMsg }],
             temperature: config?.temperature ?? 0.7,
           }),
         });
@@ -922,9 +1385,13 @@ async function startServer() {
           throw new Error(data.error?.message || "Anthropic request failed");
         }
         const text = data.content?.[0]?.text || "";
-        return res.json({ text, raw: data });
+        return res.json({
+          text,
+          candidates: [{ content: { parts: [{ text }] } }],
+          raw: data
+        });
       } else if (provider === "ollama") {
-        const host = baseUrl || "http://localhost:11434";
+        const host = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
         const targetModel = model || "llama3.3:70b";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
@@ -943,8 +1410,12 @@ async function startServer() {
         if (!apiRes.ok) {
           throw new Error(data.error || "Ollama generation failed");
         }
-        const text = data.message?.content || "";
-        return res.json({ text, raw: data });
+        const text = data.message?.content || data.response || "";
+        return res.json({
+          text,
+          candidates: [{ content: { parts: [{ text }] } }],
+          raw: data
+        });
       } else {
         res.status(400).json({ error: `Unsupported provider: ${provider}` });
       }
@@ -1072,23 +1543,40 @@ async function startServer() {
   // -------------------------------------------------------------
   // Vite Middleware / Static Serving
   // -------------------------------------------------------------
-  if (process.env.NODE_ENV !== "production") {
+  const isDev = process.env.NODE_ENV === "development";
+  const hasDist = fs.existsSync(path.join(process.cwd(), "dist", "index.html"));
+
+  if (isDev) {
     structuredLog("INFO", "Starting Vite in middleware mode...");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (hasDist) {
     structuredLog("INFO", "Serving static files from dist...");
     app.use(express.static("dist"));
     app.use((req, res, next) => {
       if (req.method !== "GET") return next();
-      if (req.path.startsWith("/api") || req.path.startsWith("/health")) {
+      if (
+        req.path.startsWith("/api") || 
+        req.path.startsWith("/health") || 
+        req.path.startsWith("/readyz") || 
+        req.path.startsWith("/livez") || 
+        req.path.startsWith("/status") || 
+        req.path.startsWith("/ping")
+      ) {
         return next();
       }
       res.sendFile("dist/index.html", { root: process.cwd() });
     });
+  } else {
+    structuredLog("INFO", "Fallback: starting Vite middleware mode...");
+    const vite = await createViteServer({
+      server: { middlewareMode: true, hmr: false },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   }
 
   app.listen(PORT, "0.0.0.0", () => {

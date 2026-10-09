@@ -4,8 +4,10 @@ import JSZip from 'jszip';
 import { TeamAssignmentsView } from './TeamView';
 import { Project, Task, User, Resource } from '../types';
 import { WorkloadView } from './WorkloadView';
+import { RaciMatrixView } from '../components/RaciMatrixView';
 import { parseResourcesFromMarkdown } from '../utils/be-logic';
 import { ProjectStateDownloadModal } from '../components/ProjectStateDownloadModal';
+import { getDefaultResourceAllocations, DEFAULT_RESOURCE_ALLOCATIONS, STANDARD_RACI_ROLES } from '../constants/raciDefaults';
 
 // --- GANTT COMPONENTS ---
 
@@ -164,9 +166,22 @@ const GanttChart = ({ tasks, startDate, endDate }: { tasks: Task[], startDate: s
 
 // --- EXISTING COMPONENTS ---
 
-const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating }: { project: Project, onUpdateProject: (p: Partial<Project>) => void, onEstimateCosts: () => void, isEstimating: boolean }) => {
+const ResourcesView = ({ 
+    project, 
+    onUpdateProject, 
+    onEstimateCosts, 
+    isEstimating,
+    onSwitchToRaci 
+}: { 
+    project: Project; 
+    onUpdateProject: (p: Partial<Project>) => void; 
+    onEstimateCosts: () => void; 
+    isEstimating: boolean;
+    onSwitchToRaci?: () => void;
+}) => {
     const resources = project.resources || [];
     const [newResourceName, setNewResourceName] = useState('');
+    const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
     const extractedResources = useMemo(() => {
         const resourceDoc = project.documents.find(d => d.title === 'Resources & Skills List');
@@ -175,27 +190,66 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
     }, [project.documents, project.phasesData]);
 
     const unimportedCount = useMemo(() => {
-        const currentResourceNames = new Set(resources.map(r => r.name));
-        return extractedResources.filter(name => !currentResourceNames.has(name)).length;
+        const currentResourceNames = new Set(resources.map(r => r.name.toLowerCase()));
+        return extractedResources.filter(name => !currentResourceNames.has(name.toLowerCase())).length;
     }, [extractedResources, resources]);
 
     const handleImportFromDoc = () => {
-        const currentResourceNames = new Set(resources.map(r => r.name));
+        const currentResourceNames = new Set(resources.map(r => r.name.toLowerCase()));
         const newResourcesToAdd = extractedResources
-            .filter(name => !currentResourceNames.has(name))
+            .filter(name => !currentResourceNames.has(name.toLowerCase()))
             .map(name => ({ 
                 id: crypto.randomUUID(),
                 name, 
                 type: 'human' as const,
-                unitCost: 0, 
-                quantity: 0, 
-                totalCost: 0 
+                unitCost: 110, 
+                quantity: 40, 
+                totalCost: 4400 
             }));
         if (newResourcesToAdd.length > 0) {
             const updatedResources = [...resources, ...newResourcesToAdd];
             const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
             onUpdateProject({ resources: updatedResources, budget: totalBudget });
+            setStatusMsg(`Imported ${newResourcesToAdd.length} resources from Phase 2 document!`);
+            setTimeout(() => setStatusMsg(null), 4000);
         }
+    };
+
+    const handleApplyDefaultAllocations = () => {
+        const defaults = getDefaultResourceAllocations();
+        const existingNames = new Set((resources || []).map(r => r.name.toLowerCase()));
+        
+        // Add default resources not already defined
+        const itemsToAdd = defaults.filter(d => !existingNames.has(d.name.toLowerCase()));
+        const updatedResources = resources.length === 0 ? defaults : [...resources, ...itemsToAdd];
+        const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || (r.unitCost * r.quantity) || 0), 0);
+        
+        // Ensure standard roles exist in project team
+        const currentRoleNames = new Set((project.team || []).map(m => m.role));
+        const newTeamMembers = STANDARD_RACI_ROLES
+            .filter(r => !currentRoleNames.has(r.title))
+            .map(r => ({
+                userId: `team-${r.id}-${Date.now()}`,
+                role: r.title,
+                name: '',
+                email: ''
+            }));
+
+        onUpdateProject({ 
+            resources: updatedResources, 
+            budget: totalBudget,
+            team: [...(project.team || []), ...newTeamMembers]
+        });
+        setStatusMsg(`Applied default resource assignments based on RACI chart (${updatedResources.length} total resources)!`);
+        setTimeout(() => setStatusMsg(null), 4000);
+    };
+
+    const handleResetToDefaults = () => {
+        const defaults = getDefaultResourceAllocations();
+        const totalBudget = defaults.reduce((sum, r) => sum + (r.totalCost || (r.unitCost * r.quantity) || 0), 0);
+        onUpdateProject({ resources: defaults, budget: totalBudget });
+        setStatusMsg('Reset resource allocations to standard RACI chart defaults!');
+        setTimeout(() => setStatusMsg(null), 4000);
     };
 
     const handleUpdate = (index: number, field: keyof Resource, value: any) => {
@@ -218,9 +272,9 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                 id: crypto.randomUUID(),
                 name: newResourceName.trim(), 
                 type: 'human', 
-                unitCost: 0, 
-                quantity: 0, 
-                totalCost: 0 
+                unitCost: 100, 
+                quantity: 40, 
+                totalCost: 4000 
             };
             const updatedResources = [...resources, newRes];
             const totalBudget = updatedResources.reduce((sum, r) => sum + (r.totalCost || 0), 0);
@@ -237,6 +291,60 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
 
     return (
         <div className="glass-card" style={{ padding: '2rem', borderLeft: 'none' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                    <h3 className="subsection-title" style={{ margin: 0 }}>Project Resource Allocation</h3>
+                    <p style={{ margin: '0.25rem 0 0', color: 'var(--secondary-text)', fontSize: '0.85rem' }}>
+                        Manage labor rates, hours, and assets based on standard RACI roles and project execution requirements.
+                    </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button 
+                        className="button button-generate button-small" 
+                        onClick={handleApplyDefaultAllocations}
+                        title="Load standard human and physical resource assignments based loosely on the RACI roles chart"
+                        style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+                    >
+                        <span>⚡</span>
+                        <span>Apply RACI Default Allocations</span>
+                    </button>
+                    {onSwitchToRaci && (
+                        <button 
+                            className="button button-secondary button-small" 
+                            onClick={onSwitchToRaci}
+                            title="Open the Responsibility Assignment Matrix"
+                        >
+                            📋 View RACI Matrix
+                        </button>
+                    )}
+                    {resources.length > 0 && (
+                        <button 
+                            className="button button-secondary button-small" 
+                            onClick={handleResetToDefaults}
+                            title="Reset all resource items back to clean RACI chart defaults"
+                            style={{ opacity: 0.8 }}
+                        >
+                            ↺ Reset to Chart Defaults
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {statusMsg && (
+                <div style={{
+                    background: 'rgba(0, 242, 255, 0.1)',
+                    border: '1px solid rgba(0, 242, 255, 0.4)',
+                    color: '#00f2ff',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    marginBottom: '1.25rem'
+                }}>
+                    ✓ {statusMsg}
+                </div>
+            )}
+
             <div style={{marginBottom: '2rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'}}>
                 <input 
                     type="text" 
@@ -275,6 +383,33 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                     )}
                 </button>
             </div>
+
+            {resources.length === 0 && (
+                <div style={{
+                    padding: '2.5rem 1.5rem',
+                    textAlign: 'center',
+                    background: 'rgba(0, 242, 255, 0.03)',
+                    borderRadius: '12px',
+                    border: '1px dashed rgba(0, 242, 255, 0.3)',
+                    margin: '1.5rem 0'
+                }}>
+                    <div style={{ fontSize: '2.2rem', marginBottom: '0.5rem' }}>📊</div>
+                    <h4 style={{ margin: '0 0 0.5rem', color: 'var(--primary-text)', fontSize: '1.1rem' }}>No Resources Allocated Yet</h4>
+                    <p style={{ margin: '0 auto 1.5rem', color: 'var(--secondary-text)', fontSize: '0.875rem', maxWidth: '600px' }}>
+                        Quick-start your budget and staffing by applying default assignments based loosely on the RACI responsibility chart (Project Manager, Technical Lead, Developers, Business Analyst, QA Lead, PMO, Cloud & Tooling assets).
+                    </p>
+                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button className="button button-generate" onClick={handleApplyDefaultAllocations} style={{ padding: '0.6rem 1.25rem' }}>
+                            ⚡ Apply RACI Default Allocations
+                        </button>
+                        {unimportedCount > 0 && (
+                            <button className="button button-secondary" onClick={handleImportFromDoc} style={{ padding: '0.6rem 1.25rem' }}>
+                                Sync from Phase 2 Document ({unimportedCount} items)
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div style={{overflowX: 'auto'}}>
                 <table style={{width: '100%', borderCollapse: 'separate', borderSpacing: '0 0.5rem'}}>
@@ -320,7 +455,6 @@ const ResourcesView = ({ project, onUpdateProject, onEstimateCosts, isEstimating
                                 </td>
                             </tr>
                         ))}
-                        {resources.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: '4rem', opacity: 0.5 }}>No resources defined. Add one above or generate from documents.</td></tr>}
                         {resources.length > 0 && (
                             <tr style={{borderTop: '2px solid var(--border-color)'}}>
                                 <td colSpan={4} style={{textAlign: 'right', padding: '1rem', fontWeight: 'bold'}}>Total Estimated Budget:</td>
@@ -468,6 +602,7 @@ export const ProjectTrackingView: React.FC<{
         { id: 'Task List', label: `Task List (${project.tasks?.length || 0})` },
         { id: 'Kanban Board', label: 'Kanban Board' },
         { id: 'Workload', label: 'Workload' },
+        { id: 'RACI Matrix', label: 'RACI Matrix' },
         { id: 'Milestones', label: `Milestones (${project.milestones?.length || 0})` },
         { id: 'Team', label: `Team (${project.team?.length || 0})` },
         { id: 'Resources', label: `Resources (${project.resources?.length || 0})` }
@@ -543,9 +678,34 @@ export const ProjectTrackingView: React.FC<{
                         </div>
                     </div>
                 )}
-                {trackingView === 'Resources' && <ResourcesView project={project} onUpdateProject={onUpdateProject} onEstimateCosts={onEstimateCosts} isEstimating={isEstimating} />}
+                {trackingView === 'Resources' && (
+                    <ResourcesView 
+                        project={project} 
+                        onUpdateProject={onUpdateProject} 
+                        onEstimateCosts={onEstimateCosts} 
+                        isEstimating={isEstimating} 
+                        onSwitchToRaci={() => handleViewChange('RACI Matrix')}
+                    />
+                )}
                 {trackingView === 'Team' && <div className="glass-card" style={{ padding: '3rem', borderLeft: 'none' }}><TeamAssignmentsView project={project} onUpdateTeam={onUpdateTeam} currentUser={currentUser} /></div>}
-                {trackingView === 'Workload' && <div className="glass-card" style={{ borderLeft: 'none' }}><WorkloadView project={project} /></div>}
+                {trackingView === 'Workload' && (
+                    <div className="glass-card" style={{ borderLeft: 'none' }}>
+                        <WorkloadView 
+                            project={project} 
+                            onUpdateProject={onUpdateProject} 
+                            onSwitchToRaci={() => handleViewChange('RACI Matrix')}
+                        />
+                    </div>
+                )}
+                {trackingView === 'RACI Matrix' && (
+                    <div className="glass-card" style={{ borderLeft: 'none' }}>
+                        <RaciMatrixView 
+                            project={project} 
+                            onUpdateProject={onUpdateProject} 
+                            onUpdateTask={onUpdateTask} 
+                        />
+                    </div>
+                )}
                 {trackingView === 'Kanban Board' && (
                     <div className="kanban-board" style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '1rem' }}>
                         {['todo', 'inprogress', 'review', 'done'].map(status => {

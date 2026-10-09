@@ -1,8 +1,55 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Project, Task } from '../types';
+import { STANDARD_RACI_ROLES, applyRaciDefaultsToTasks, getDefaultResourceAllocations } from '../constants/raciDefaults';
 
-export const WorkloadView: React.FC<{ project: Project }> = ({ project }) => {
+export const WorkloadView: React.FC<{ 
+    project: Project; 
+    onUpdateProject?: (p: Partial<Project>) => void;
+    onSwitchToRaci?: () => void;
+}> = ({ project, onUpdateProject, onSwitchToRaci }) => {
     const { tasks, startDate, endDate } = project;
+    const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+    const roleIconMap = useMemo(() => {
+        const map: Record<string, string> = {};
+        STANDARD_RACI_ROLES.forEach(r => {
+            map[r.title.toLowerCase()] = r.icon;
+        });
+        return map;
+    }, []);
+
+    const handleApplyRaciAllocations = () => {
+        if (!tasks || tasks.length === 0) return;
+        const updatedTasks = applyRaciDefaultsToTasks(tasks);
+        
+        // Ensure standard roles exist in project team
+        const currentRoleNames = new Set((project.team || []).map(m => m.role));
+        const newTeamMembers = STANDARD_RACI_ROLES
+            .filter(r => !currentRoleNames.has(r.title))
+            .map(r => ({
+                userId: `team-${r.id}-${Date.now()}`,
+                role: r.title,
+                name: '',
+                email: ''
+            }));
+
+        // If resources table is empty, also seed default resource allocations from chart
+        const defaultResources = (!project.resources || project.resources.length === 0)
+            ? getDefaultResourceAllocations()
+            : project.resources;
+        const totalBudget = defaultResources.reduce((sum, r) => sum + (r.totalCost || (r.unitCost * r.quantity) || 0), 0);
+
+        if (onUpdateProject) {
+            onUpdateProject({
+                tasks: updatedTasks,
+                team: [...(project.team || []), ...newTeamMembers],
+                resources: defaultResources,
+                budget: totalBudget > 0 ? totalBudget : project.budget
+            });
+            setStatusMsg(`Applied RACI default resource allocations across ${updatedTasks.length} tasks!`);
+            setTimeout(() => setStatusMsg(null), 4000);
+        }
+    };
 
     // --- Timeline Logic (Same as GanttChart) ---
     const { projectStart, projectEnd, totalDuration } = useMemo(() => {
@@ -82,14 +129,57 @@ export const WorkloadView: React.FC<{ project: Project }> = ({ project }) => {
 
     return (
         <div className="workload-container" style={{ padding: '1.5rem', overflow: 'hidden' }}>
-            <div style={{ marginBottom: '1.5rem', color: 'var(--secondary-text)' }}>
-                Visualizing resource allocation by role. Overlapping tasks are stacked vertically to show concurrency conflicts.
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                    <h3 className="subsection-title" style={{ margin: 0 }}>Resource Allocation & Workload Matrix</h3>
+                    <p style={{ margin: '0.25rem 0 0', color: 'var(--secondary-text)', fontSize: '0.85rem' }}>
+                        Visualizing resource allocation by role. Overlapping tasks are stacked vertically to show concurrency conflicts.
+                    </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {onUpdateProject && (
+                        <button
+                            onClick={handleApplyRaciAllocations}
+                            className="button button-generate button-small"
+                            style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+                            title="Assign standard RACI roles to all tasks based on Responsibility Assignment Matrix"
+                        >
+                            <span>⚡</span>
+                            <span>Apply RACI Default Allocations</span>
+                        </button>
+                    )}
+                    {onSwitchToRaci && (
+                        <button
+                            onClick={onSwitchToRaci}
+                            className="button button-secondary button-small"
+                            style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }}
+                        >
+                            📋 View RACI Matrix
+                        </button>
+                    )}
+                </div>
             </div>
 
-            <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '200px 1fr', gap: '1rem', alignItems: 'start' }}>
+            {statusMsg && (
+                <div style={{
+                    background: 'rgba(0, 242, 255, 0.1)',
+                    border: '1px solid rgba(0, 242, 255, 0.4)',
+                    color: '#00f2ff',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    marginBottom: '1rem'
+                }}>
+                    ✓ {statusMsg}
+                </div>
+            )}
+
+            <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '220px 1fr', gap: '1rem', alignItems: 'start' }}>
                 {/* Header Row */}
                 <div style={{ fontWeight: 'bold', color: 'var(--secondary-text)', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-                    Role / Resource
+                    Role / Resource (RACI)
                 </div>
                 <div style={{ position: 'relative', height: '30px', borderBottom: '1px solid var(--border-color)' }}>
                     {ticks.map((tick, i) => {
@@ -118,8 +208,11 @@ export const WorkloadView: React.FC<{ project: Project }> = ({ project }) => {
                             flexDirection: 'column',
                             justifyContent: 'center'
                         }}>
-                            <div style={{fontWeight: 600, color: 'var(--primary-text)'}}>{role}</div>
-                            <div style={{fontSize: '0.75rem', color: 'var(--secondary-text)'}}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '1rem' }}>{roleIconMap[role.toLowerCase()] || '💼'}</span>
+                                <span style={{ fontWeight: 600, color: 'var(--primary-text)' }}>{role}</span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--secondary-text)', marginTop: '2px' }}>
                                 {layout.lanes.flat().length} tasks • {layout.lanes.length} concurrent
                             </div>
                         </div>
@@ -166,16 +259,29 @@ export const WorkloadView: React.FC<{ project: Project }> = ({ project }) => {
                                                 opacity: 0.9,
                                                 display: 'flex',
                                                 alignItems: 'center',
-                                                padding: '0 8px',
-                                                fontSize: '0.75rem',
+                                                gap: '5px',
+                                                padding: '0 6px',
+                                                fontSize: '0.72rem',
                                                 color: 'white',
                                                 whiteSpace: 'nowrap',
                                                 overflow: 'hidden',
                                                 textOverflow: 'ellipsis',
                                                 zIndex: 1,
                                                 cursor: 'help'
-                                            }} title={`${task.name} (${task.startDate} - ${task.endDate})`}>
-                                                {task.name}
+                                            }} title={`${task.name} (${task.startDate} - ${task.endDate})${task.raciAssignments?.accountable ? ` | Accountable: ${task.raciAssignments.accountable}` : ''}`}>
+                                                {task.raciAssignments?.responsible && (
+                                                    <span style={{ 
+                                                        fontSize: '0.65rem', 
+                                                        fontWeight: 900, 
+                                                        background: '#1d4ed8', 
+                                                        color: '#fff', 
+                                                        padding: '1px 4px', 
+                                                        borderRadius: '3px' 
+                                                    }}>
+                                                        R
+                                                    </span>
+                                                )}
+                                                <span>{task.name}</span>
                                             </div>
                                         );
                                     })}

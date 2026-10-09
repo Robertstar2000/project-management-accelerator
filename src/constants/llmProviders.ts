@@ -27,43 +27,37 @@ export const LLM_PROVIDERS: Record<LlmProviderId, ProviderDefinition> = {
         id: 'google',
         name: 'Google Gemini',
         tagline: 'Native multimodal reasoning with ultra-large context',
-        description: 'Google AI models featuring Gemini 2.5 Flash and Pro with native multimodal reasoning and fast synthesis.',
+        description: 'Google AI models featuring Gemini 3.8 Flash and Gemini 3.1 Pro with native multimodal reasoning and fast synthesis.',
         brandColor: '#06b6d4', // cyan
         badgeBg: 'rgba(6, 182, 212, 0.1)',
         badgeBorder: 'rgba(6, 182, 212, 0.3)',
         badgeText: '#22d3ee',
-        defaultModel: 'gemini-2.5-flash',
+        defaultModel: 'gemini-3.8-flash',
         models: [
             {
-                id: 'gemini-2.5-flash',
-                name: 'Gemini 2.5 Flash',
-                description: 'Ultra-fast, high capability model for adaptive planning & synthesis',
+                id: 'gemini-3.8-flash',
+                name: 'Gemini 3.8 Flash',
+                description: 'Next-generation fast flagship model for adaptive planning, synthesis & multi-agent execution',
                 recommended: true,
                 tag: 'Recommended'
             },
             {
-                id: 'gemini-2.5-pro',
-                name: 'Gemini 2.5 Pro',
-                description: 'Flagship reasoning for complex architecture and multi-phase risk analysis',
+                id: 'gemini-3.1-pro-preview',
+                name: 'Gemini 3.1 Pro Preview',
+                description: 'Flagship reasoning for complex architecture, deep analysis, and multi-phase risk auditing',
                 tag: 'Advanced'
             },
             {
-                id: 'gemini-2.0-flash',
-                name: 'Gemini 2.0 Flash',
-                description: 'Low-latency generation for rapid task breakdowns',
+                id: 'gemini-3.1-flash-lite',
+                name: 'Gemini 3.1 Flash Lite',
+                description: 'Ultra low-latency lightweight model for high-speed rapid task breakdowns',
                 tag: 'High Speed'
             },
             {
-                id: 'gemini-1.5-pro',
-                name: 'Gemini 1.5 Pro',
-                description: 'Extended 2M token context window for massive project archives',
-                tag: 'Deep Context'
-            },
-            {
-                id: 'gemini-1.5-flash',
-                name: 'Gemini 1.5 Flash',
-                description: 'High throughput, cost-efficient workhorse model',
-                tag: 'Standard'
+                id: 'gemini-flash-latest',
+                name: 'Gemini Flash (Latest)',
+                description: 'Always routes to the latest stable Google Gemini Flash model',
+                tag: 'Latest'
             }
         ],
         keyPrefixHint: 'AIzaSy...',
@@ -266,9 +260,9 @@ export const LLM_PROVIDERS: Record<LlmProviderId, ProviderDefinition> = {
                 tag: 'Fast'
             },
             {
-                id: 'google/gemini-2.0-flash-001',
-                name: 'Gemini 2.0 Flash',
-                description: 'Google Gemini 2.0 Flash routed through OpenRouter balance',
+                id: 'google/gemini-flash-latest',
+                name: 'Gemini Flash (Latest)',
+                description: 'Google Gemini Flash routed through OpenRouter balance',
                 tag: 'Affordable'
             }
         ],

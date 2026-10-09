@@ -14,7 +14,7 @@ export const executeTrackingDataWorkflow = async (
     onProgress: (msg: string) => void
 ): Promise<{ tasks: Task[]; milestones: Milestone[]; roles: string[] }> => {
     const ai = getGeminiClient();
-    const model = 'gemini-3-flash-preview';
+    const model = 'gemini-3.8-flash';
 
     onProgress("Agent 1/4 (Extractor): Analyzing project documentation...");
     

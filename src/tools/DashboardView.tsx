@@ -1,6 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Project, Document, Milestone } from '../types';
+import { D3DependencyForceGraph } from '../components/D3DependencyForceGraph';
 
 const diffInDays = (date1: string, date2: string) => {
     if (!date1 || !date2) return 0;
@@ -284,6 +285,11 @@ export const DashboardView: React.FC<{
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><div style={{ width: '8px', height: '8px', background: 'var(--warning-color)' }}></div> Review ({metrics.reviewCount})</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><div style={{ width: '8px', height: '8px', background: 'var(--success-color)' }}></div> Resolved ({metrics.completedTasks})</div>
                 </div>
+            </div>
+
+            {/* D3 Force-Directed HMAP Dependency & Blast-Radius Graph */}
+            <div className="col-span-12" style={{ marginTop: '0.5rem' }}>
+                <D3DependencyForceGraph project={project} />
             </div>
         </div>
     );

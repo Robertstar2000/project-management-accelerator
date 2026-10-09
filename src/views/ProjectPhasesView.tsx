@@ -1,7 +1,29 @@
 import React, { useState } from 'react';
 import { PhaseCard } from '../components/PhaseCard';
+import { RunningManAnimation } from '../components/RunningManAnimation';
 
-export const ProjectPhasesView = ({ project, projectPhases, phasesData, documents, error, loadingPhase, handleUpdatePhaseData, handleCompletePhase, handleGenerateContent, handleGenerateImages, handleChatToChange, handleAttachFile, handleRemoveAttachment, generationMode, onSetGenerationMode, isAutoGenerating, onBasicPlan, isBasicPlanRunning }) => {
+export const ProjectPhasesView = ({ 
+    project, 
+    projectPhases, 
+    phasesData, 
+    documents, 
+    error, 
+    loadingPhase, 
+    handleUpdatePhaseData, 
+    handleCompletePhase, 
+    handleGenerateContent, 
+    handleGenerateImages, 
+    handleChatToChange, 
+    handleAttachFile, 
+    handleRemoveAttachment, 
+    handleAutoResolveBlocker,
+    handleMitigateBlocker,
+    generationMode, 
+    onSetGenerationMode, 
+    isAutoGenerating, 
+    onBasicPlan, 
+    isBasicPlanRunning 
+}) => {
     const [openPhases, setOpenPhases] = useState(() => {
         try {
             const firstTodoDoc = documents.find(d => d.status !== 'Approved');
@@ -19,6 +41,20 @@ export const ProjectPhasesView = ({ project, projectPhases, phasesData, document
             : [...openPhases, docId];
         setOpenPhases(newOpenPhases);
         localStorage.setItem(`hmap-open-phases-${project.id}`, JSON.stringify(newOpenPhases));
+    };
+
+    const handleAutoResolveWithOpen = (phaseId: string, blockerDescription: string, blockerId: string) => {
+        setOpenPhases(prev => {
+            if (prev.includes(phaseId)) return prev;
+            const updated = [...prev, phaseId];
+            localStorage.setItem(`hmap-open-phases-${project.id}`, JSON.stringify(updated));
+            return updated;
+        });
+        if (handleAutoResolveBlocker) {
+            handleAutoResolveBlocker(phaseId, blockerDescription, blockerId);
+        } else {
+            handleGenerateContent(phaseId, '', undefined, { description: blockerDescription, blockerId });
+        }
     };
 
     const onPhaseComplete = (docId) => {
@@ -102,10 +138,12 @@ export const ProjectPhasesView = ({ project, projectPhases, phasesData, document
                             onComplete={onPhaseComplete}
                             onAttachFile={handleAttachFile}
                             onRemoveAttachment={handleRemoveAttachment}
+                            onAutoResolve={handleAutoResolveWithOpen}
+                            onMitigateBlocker={handleMitigateBlocker}
                             status={status}
                             isLoading={loadingPhase?.docId === phase.id}
                             loadingStep={loadingPhase?.docId === phase.id ? loadingPhase.step : null}
-                            isOpen={openPhases.includes(phase.id)}
+                            isOpen={openPhases.includes(phase.id) || loadingPhase?.docId === phase.id}
                             onToggleOpen={() => togglePhaseOpen(phase.id)}
                         />
                         
@@ -150,9 +188,11 @@ export const ProjectPhasesView = ({ project, projectPhases, phasesData, document
                                     </div>
                                 </div>
                                 {isBasicPlanRunning && (
-                                    <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-                                        <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
-                                        <p style={{ color: 'var(--accent-color)' }}>Executing Automated Synthesis... Generating all documents and artifacts.</p>
+                                    <div style={{ marginTop: '2rem' }}>
+                                        <RunningManAnimation 
+                                            label="Executing Automated Multi-Phase Synthesis... Generating all documents and graphical artifacts." 
+                                            stepName="Full Project Plan Sequence" 
+                                        />
                                     </div>
                                 )}
                             </div>

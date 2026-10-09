@@ -8,13 +8,21 @@ import { ProjectPhasesView } from './ProjectPhasesView';
 import { DocumentsView } from '../tools/DocumentsView';
 import { ProjectTrackingView } from '../tools/ProjectTrackingView';
 import { RevisionControlView } from '../tools/RevisionControlView';
+import { AgentHarnessesView } from '../tools/AgentHarnessesView';
+import { ProjectMemoryView } from '../tools/ProjectMemoryView';
+import { VirtualChallengesView } from '../tools/VirtualChallengesView';
+import { EngineeringDeliveryView } from '../tools/EngineeringDeliveryView';
 import { DownloadModal } from '../components/DownloadModal';
 import { ProjectExportModal } from '../components/ProjectExportModal';
-import { Share2 } from 'lucide-react';
+import { Share2, AlertTriangle } from 'lucide-react';
 import { TaskDetailModal } from '../components/TaskDetailModal';
 import { AiReportModal } from '../components/AiReportModal';
+import { D3DependencyForceGraph } from '../components/D3DependencyForceGraph';
+import { calculateStaleCount } from '../utils/dependencyAwareLogic';
+import { updateBlockerStatus } from '../utils/phaseBlockers';
 import { parseRolesFromMarkdown, parseResourcesFromMarkdown } from '../utils/be-logic';
 import { executeTrackingDataWorkflow } from '../utils/trackingDataAgentWorkflow';
+import { applyRaciDefaultsToTasks, getDefaultResourceAllocations } from '../constants/raciDefaults';
 import { getGeminiClient } from '../utils/geminiClient';
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
@@ -96,6 +104,17 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
     const [zipBlob, setZipBlob] = useState<Blob | null>(null);
     const isProcessingRef = useRef(false);
 
+    // Stale dependency count derived from dependency-aware logic
+    const [staleDependencyCount, setStaleDependencyCount] = useState<number>(() => calculateStaleCount(project.id));
+    useEffect(() => {
+        const updateCount = () => {
+            setStaleDependencyCount(calculateStaleCount(projectDataRef.current.id));
+        };
+        updateCount();
+        window.addEventListener('hmap-dependency-state-changed', updateCount);
+        return () => window.removeEventListener('hmap-dependency-state-changed', updateCount);
+    }, [project.id]);
+
     const projectDataRef = useRef(projectData);
     useEffect(() => { projectDataRef.current = projectData; }, [projectData]);
 
@@ -171,7 +190,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 console.log(`Generating image for ${artifact} with prompt length: ${prompt.length}`);
 
                 const result = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                    model: 'gemini-2.5-flash-image',
+                    model: 'gemini-3.1-flash-lite-image',
                     contents: { parts: [{ text: prompt }] },
                     config: { imageConfig: { aspectRatio: "16:9" } }
                 }));
@@ -232,7 +251,12 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         }
     }, [handleSave, currentUser.username]);
 
-    const handleGenerateContent = useCallback(async (docId: string, userInput: string, projectStateOverride?: Project) => {
+    const handleGenerateContent = useCallback(async (
+        docId: string, 
+        userInput: string, 
+        projectStateOverride?: Project, 
+        blockerInstruction?: { description: string; blockerId: string }
+    ) => {
         // Allow auto-pilot recursive calls to proceed if they are part of the same flow, 
         // but block manual concurrent calls. 
         // Since isAutoGenerating controls the loop, this check effectively debounces manual clicks.
@@ -258,7 +282,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 setLoadingPhase({ docId, step: 'checking terms' });
                 try {
                     const termResult = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                        model: 'gemini-3-flash-preview',
+                        model: 'gemini-3.8-flash',
                         contents: PROMPTS.identifyUnknownTerms(userInput),
                         config: { responseMimeType: 'application/json' }
                     }));
@@ -266,7 +290,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                     if (unknownTerms.length > 0) {
                         setLoadingPhase({ docId, step: 'searching definitions' });
                         const defResult = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                            model: 'gemini-3-flash-preview',
+                            model: 'gemini-3.8-flash',
                             contents: PROMPTS.getDefinitions(unknownTerms),
                             config: { tools: [{ googleSearch: {} }] }
                         }));
@@ -283,7 +307,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             setLoadingPhase({ docId, step: 'generating' });
             const promptFn = getPromptFunction(docToGenerate.title, docToGenerate.phase);
             const primaryInput = docToGenerate.phase === 1 ? (enrichedUserInput || "Starting documentation") : (`${firstDocContext}\n\n${prevDocContext}`.trim() || userInput);
-            const promptText = promptFn(
+            let promptText = promptFn(
                 currentProjectData.name, 
                 currentProjectData.discipline, 
                 primaryInput, 
@@ -293,19 +317,23 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 currentProjectData.complexity || 'typical'
             );
 
+            // Insert blocker resolution instructions if auto-resolving
+            if (blockerInstruction) {
+                promptText += `\n\n=======================================================\nCRITICAL DIRECTIVE - RESOLVE BLOCKER:\nPlease follow instructions to: resolve the ${blockerInstruction.description}.\nExplicitly update technical parameters, interface specifications, risk allocations, and architectural designs so this blocker is completely mitigated and resolved in this step/phase.\n=======================================================\n`;
+            }
+
             console.log(`Generating content for ${docToGenerate.title} (Phase ${docToGenerate.phase}) with prompt length: ${promptText.length}`);
 
             const result = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-                model: 'gemini-3-flash-preview', contents: truncatePrompt(promptText),
-                config: { temperature: 0.7, thinkingConfig: { thinkingBudget: 0 } }
+                model: 'gemini-3.8-flash', contents: truncatePrompt(promptText),
+                config: { temperature: 0.7 }
             }));
             const newContent = result.text || '';
             if (!newContent) throw new Error("Empty response.");
 
             setLoadingPhase({ docId, step: 'compacting' });
             const compactRes = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-                model: 'gemini-3-flash-preview', contents: PROMPTS.compactContent(newContent),
-                config: { thinkingConfig: { thinkingBudget: 0 } }
+                model: 'gemini-3.8-flash', contents: PROMPTS.compactContent(newContent)
             }));
             const newCompacted = compactRes.text || newContent.substring(0, 500);
 
@@ -313,7 +341,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             let selectedArtifacts: string[] = [];
             try {
                 const artifactRes = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-                    model: 'gemini-3-flash-preview',
+                    model: 'gemini-3.8-flash',
                     contents: PROMPTS.selectBestArtifact(docToGenerate.title, newContent, GRAPHICAL_ARTIFACTS)
                 }));
                 let bestArtifact = artifactRes.text?.trim() || '';
@@ -336,9 +364,21 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             // Save content first
             handleSave(prev => ({ phasesData: { ...prev.phasesData, [docId]: { ...(prev.phasesData[docId] || {}), content: newContent, compactedContent: newCompacted, selectedArtifacts } } }));
             
-            // Trigger image generation if an artifact was selected
+            // Trigger image generation if an artifact was selected (running man keeps running until images finish rendering)
             if (selectedArtifacts.length > 0) {
                  await handleGenerateImages(docId, selectedArtifacts, newContent, true);
+            }
+
+            // If auto-resolving a blocker, update the blocker status to auto_resolved
+            if (blockerInstruction?.blockerId) {
+                updateBlockerStatus(
+                    currentProjectData.id,
+                    docId,
+                    blockerInstruction.blockerId,
+                    'auto_resolved',
+                    docToGenerate.originalPhaseId || `phase${docToGenerate.phase}`,
+                    `Auto-resolved via re-running step/phase with instructions: resolve the ${blockerInstruction.description}`
+                );
             }
 
             return { success: true, newContent, newCompactedContent: newCompacted };
@@ -350,6 +390,22 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             isProcessingRef.current = false;
         }
     }, [handleSave, isAutoGenerating, handleGenerateImages]);
+
+    const handleAutoResolveBlocker = useCallback(async (phaseId: string, blockerDescription: string, blockerId: string) => {
+        const existingInput = projectDataRef.current.phasesData[phaseId]?.content || '';
+        await handleGenerateContent(phaseId, existingInput, undefined, { description: blockerDescription, blockerId });
+    }, [handleGenerateContent]);
+
+    const handleMitigateBlocker = useCallback((phaseId: string, blockerId: string) => {
+        const doc = projectDataRef.current.documents.find(d => d.id === phaseId);
+        updateBlockerStatus(
+            projectDataRef.current.id, 
+            phaseId, 
+            blockerId, 
+            'user_mitigated', 
+            doc?.originalPhaseId || `phase${doc?.phase}`
+        );
+    }, []);
 
     const handleUpdatePhaseData = useCallback(async (docId: string, content: string) => {
         handleSave(prev => ({ phasesData: { ...prev.phasesData, [docId]: { ...(prev.phasesData[docId] || {}), content } } }));
@@ -367,9 +423,9 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         setError('');
         try {
             const prompt = `Modify this project document: "${userInstruction}".\n\nOriginal:\n${currentContent}`;
-            const result = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });
+            const result = await ai.models.generateContent({ model: 'gemini-3.8-flash', contents: prompt });
             const newContent = result.text || '';
-            const compactRes = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: PROMPTS.compactContent(newContent) });
+            const compactRes = await ai.models.generateContent({ model: 'gemini-3.8-flash', contents: PROMPTS.compactContent(newContent) });
             handleSave(prev => ({ phasesData: { ...prev.phasesData, [docId]: { ...(prev.phasesData[docId] || {}), content: newContent, compactedContent: compactRes.text } } }));
         } catch (e: any) { setError(`Instruction failed: ${e.message}`); }
         finally { 
@@ -531,12 +587,15 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
         try {
             const { tasks, milestones, roles } = await executeTrackingDataWorkflow(projectData, (msg) => setLoadingPhase({ docId: 'agent', step: msg }));
             
+            // Apply default resource assignments based loosely on the RACI chart
+            const tasksWithRaci = applyRaciDefaultsToTasks(tasks);
+
             // Unify discovered roles into project.team
             const currentTeam = [...(projectData.team || [])];
             const existingRoles = new Set(currentTeam.map(m => m.role));
             const allDiscoveredRoles = Array.from(new Set([
                 ...roles,
-                ...tasks.map(t => t.role).filter(Boolean)
+                ...tasksWithRaci.map(t => t.role).filter(Boolean)
             ]));
 
             allDiscoveredRoles.forEach(r => {
@@ -551,7 +610,18 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 }
             });
 
-            handleSave({ tasks, milestones, team: currentTeam, isStarted: true });
+            // If project has no resources yet, seed default resource allocations based loosely on the RACI chart
+            const defaultResources = (!projectData.resources || projectData.resources.length === 0)
+                ? getDefaultResourceAllocations()
+                : projectData.resources;
+
+            handleSave({ 
+                tasks: tasksWithRaci, 
+                milestones, 
+                team: currentTeam, 
+                resources: defaultResources,
+                isStarted: true 
+            });
             handleTabChange('Project Tracking');
         } catch (e: any) { setError("Agentic planning failed: " + e.message); }
         finally { 
@@ -640,7 +710,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             Ensure reasonable estimates. Return ONLY the JSON array.`;
 
             const result = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: 'gemini-3.8-flash',
                 contents: prompt,
                 config: { responseMimeType: 'application/json' }
             });
@@ -698,7 +768,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
 
             const prompt = PROMPTS.analyzeRisks(projectSummary, context);
             const res = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-                model: 'gemini-3-flash-preview', 
+                model: 'gemini-3.8-flash', 
                 contents: truncatePrompt(prompt) 
             }));
             
@@ -738,7 +808,7 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
 
             const prompt = PROMPTS.generateStatusSummary(projectSummary, context);
             const res = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({ 
-                model: 'gemini-3-flash-preview', 
+                model: 'gemini-3.8-flash', 
                 contents: truncatePrompt(prompt) 
             }));
             
@@ -825,6 +895,46 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                     </div>
                     
                     <button
+                        onClick={() => setActiveTab('Dependency Graph')}
+                        className="button"
+                        id="stale-dependencies-header-badge"
+                        title={staleDependencyCount > 0 ? `${staleDependencyCount} dependencies require re-review due to upstream changes` : 'All dependencies reconciled'}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: staleDependencyCount > 0 
+                                ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.18) 0%, rgba(245, 158, 11, 0.18) 100%)' 
+                                : 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.15) 100%)',
+                            border: staleDependencyCount > 0 
+                                ? '1px solid rgba(239, 68, 68, 0.5)' 
+                                : '1px solid rgba(16, 185, 129, 0.4)',
+                            color: staleDependencyCount > 0 ? '#ff5555' : '#10b981',
+                            fontWeight: 700,
+                            padding: '0.6rem 1.2rem',
+                            borderRadius: '100px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            boxShadow: staleDependencyCount > 0 ? '0 0 16px rgba(239, 68, 68, 0.3)' : 'none',
+                            position: 'relative',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <AlertTriangle size={16} color={staleDependencyCount > 0 ? '#ff5555' : '#10b981'} />
+                        <span>{staleDependencyCount} Stale Dependencies</span>
+                        {staleDependencyCount > 0 && (
+                            <span style={{
+                                width: '8px',
+                                height: '8px',
+                                borderRadius: '50%',
+                                background: '#ef4444',
+                                display: 'inline-block',
+                                animation: 'pulse 1.5s infinite'
+                            }} />
+                        )}
+                    </button>
+
+                    <button
                         onClick={() => setIsExportModalOpen(true)}
                         className="button"
                         id="export-summary-btn"
@@ -870,9 +980,10 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 gap: '0.5rem', 
                 marginBottom: '2rem', 
                 borderBottom: '1px solid var(--border-color)',
-                paddingBottom: '1rem'
+                paddingBottom: '1rem',
+                flexWrap: 'wrap'
             }}>
-                {['Dashboard', 'Project Phases', 'Documents', 'Project Tracking', 'Revision Control'].map(tab => (
+                {['Dashboard', 'Project Phases', 'Dependency Graph', 'Agent Harnesses', 'Project Memory', 'Virtual Challenges', 'Engineering Delivery', 'Documents', 'Project Tracking', 'Revision Control'].map(tab => (
                     <button 
                         key={tab}
                         onClick={() => handleTabChange(tab)} 
@@ -881,15 +992,40 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                             background: activeTab === tab ? 'var(--primary-gradient)' : 'transparent',
                             color: activeTab === tab ? '#fff' : 'var(--secondary-text)',
                             border: 'none',
-                            padding: '0.75rem 1.5rem',
+                            padding: '0.65rem 1.25rem',
                             borderRadius: '100px',
                             fontWeight: 600,
+                            fontSize: '0.85rem',
                             cursor: 'pointer',
                             transition: 'all 0.2s',
-                            boxShadow: activeTab === tab ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
+                            boxShadow: activeTab === tab ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px'
                         }}
                     >
-                        {tab}
+                        {tab === 'Dependency Graph' && (
+                            <span style={{ 
+                                display: 'inline-block', 
+                                width: '7px', 
+                                height: '7px', 
+                                borderRadius: '50%', 
+                                background: staleDependencyCount > 0 ? '#ef4444' : '#10b981' 
+                            }} />
+                        )}
+                        <span>{tab}</span>
+                        {tab === 'Dependency Graph' && staleDependencyCount > 0 && (
+                            <span style={{
+                                fontSize: '0.7rem',
+                                padding: '1px 6px',
+                                borderRadius: '100px',
+                                background: 'rgba(239, 68, 68, 0.25)',
+                                color: '#ff4444',
+                                fontWeight: 800
+                            }}>
+                                {staleDependencyCount}
+                            </span>
+                        )}
                     </button>
                 ))}
             </nav>
@@ -919,7 +1055,10 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                         handleUpdatePhaseData={handleUpdatePhaseData} handleCompletePhase={handleCompletePhase} 
                         handleGenerateContent={handleGenerateContent} handleGenerateImages={handleGenerateImages}
                         handleChatToChange={handleChatToChange} handleAttachFile={handleAttachFile} 
-                        handleRemoveAttachment={handleRemoveAttachment} generationMode={projectData.generationMode} 
+                        handleRemoveAttachment={handleRemoveAttachment} 
+                        handleAutoResolveBlocker={handleAutoResolveBlocker}
+                        handleMitigateBlocker={handleMitigateBlocker}
+                        generationMode={projectData.generationMode} 
                         onSetGenerationMode={handleSetGenerationMode} isAutoGenerating={isAutoGenerating} 
                         onBasicPlan={handleBasicPlan} isBasicPlanRunning={isBasicPlanRunning}
                     />
@@ -930,6 +1069,12 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                             <button className="button button-generate" onClick={generateAgentPlan} style={{fontSize: '1.2rem', padding: '1.5rem 3rem'}}>Run 6-Agent Synthesis Workflow</button>
                         </div>
                     )}
+                </div>
+            )}
+
+            {activeTab === 'Dependency Graph' && (
+                <div style={{ animation: 'fadeIn 0.4s ease' }}>
+                    <D3DependencyForceGraph project={projectData} />
                 </div>
             )}
             
@@ -954,6 +1099,22 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
             )}
             
             {activeTab === 'Revision Control' && <RevisionControlView project={projectData} onUpdateProject={handleSave} />}
+
+            {activeTab === 'Agent Harnesses' && (
+                <AgentHarnessesView project={projectData} onUpdateProject={handleSave} />
+            )}
+
+            {activeTab === 'Project Memory' && (
+                <ProjectMemoryView project={projectData} onUpdateProject={handleSave} />
+            )}
+
+            {activeTab === 'Virtual Challenges' && (
+                <VirtualChallengesView project={projectData} onUpdateProject={handleSave} />
+            )}
+
+            {activeTab === 'Engineering Delivery' && (
+                <EngineeringDeliveryView project={projectData} onUpdateProject={handleSave} />
+            )}
 
             {selectedTask && (
                 <TaskDetailModal 

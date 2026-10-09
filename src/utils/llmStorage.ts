@@ -50,6 +50,11 @@ export const getLlmSettings = (): LlmGlobalSettings => {
             }
         });
 
+        // Migrate deprecated or preview Google models to gemini-3.8-flash
+        if (mergedConfigs.google && (!mergedConfigs.google.model || mergedConfigs.google.model.startsWith('gemini-1.') || mergedConfigs.google.model.startsWith('gemini-2.') || mergedConfigs.google.model === 'gemini-3-flash-preview')) {
+            mergedConfigs.google.model = 'gemini-3.8-flash';
+        }
+
         // Ensure active provider is valid
         const active = PROVIDER_LIST.includes(parsed.activeProvider) ? parsed.activeProvider : 'google';
 
@@ -92,6 +97,99 @@ export const saveLlmSettings = (settings: LlmGlobalSettings, userId?: string) =>
 export const getActiveLlmConfig = (): ProviderConfig => {
     const settings = getLlmSettings();
     return settings.configs[settings.activeProvider] || settings.configs.google;
+};
+
+/**
+ * Detects the LLM provider based on API key prefix or host string.
+ */
+export const detectProviderFromKey = (key: string): LlmProviderId => {
+    const trimmed = (key || '').trim();
+    if (trimmed.startsWith('sk-ant-')) return 'anthropic';
+    if (trimmed.startsWith('sk-or-')) return 'openrouter';
+    if (trimmed.startsWith('sk-')) return 'openai';
+    if (trimmed.startsWith('AIza')) return 'google';
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes(':11434')) return 'ollama';
+    return 'google';
+};
+
+/**
+ * Applies a user-supplied API key, automatically determining the target provider
+ * and activating it globally across the workspace.
+ */
+export const applyUserApiKey = (key: string, userId?: string): LlmGlobalSettings => {
+    const trimmed = (key || '').trim();
+    if (!trimmed) return getLlmSettings();
+
+    const provider = detectProviderFromKey(trimmed);
+    const settings = getLlmSettings();
+
+    const currentConfig = settings.configs[provider] || {
+        provider,
+        authMode: 'api_key',
+        apiKey: '',
+        baseUrl: LLM_PROVIDERS[provider].defaultBaseUrl || '',
+        model: LLM_PROVIDERS[provider].defaultModel,
+        isCustomModel: false,
+        oauthConnected: false,
+        oauthPlanName: LLM_PROVIDERS[provider].oauthPlanDefault
+    };
+
+    const updatedSettings: LlmGlobalSettings = {
+        ...settings,
+        activeProvider: provider,
+        configs: {
+            ...settings.configs,
+            [provider]: {
+                ...currentConfig,
+                apiKey: trimmed,
+                authMode: 'api_key'
+            }
+        }
+    };
+
+    saveLlmSettings(updatedSettings, userId);
+    return updatedSettings;
+};
+
+/**
+ * Resolves the effective model for a provider to ensure cross-model compatibility.
+ * Prevents Google-specific model strings from being dispatched to OpenAI/Anthropic/Ollama,
+ * while respecting explicit user configurations and image generation requirements.
+ */
+export const getEffectiveModelForProvider = (
+    provider: LlmProviderId,
+    requestedModel?: string,
+    configuredModel?: string
+): string => {
+    const def = LLM_PROVIDERS[provider] || LLM_PROVIDERS.google;
+    const activeModel = configuredModel || def.defaultModel;
+
+    // Image-specific requests always retain image model tag
+    if (requestedModel && requestedModel.includes('image')) {
+        return requestedModel;
+    }
+
+    if (provider === 'google') {
+        // If user explicitly configured a model in the modal (e.g. gemini-3.1-pro-preview or gemini-3.1-flash-lite),
+        // prioritize it over generic hardcoded 'gemini-3.8-flash' caller defaults
+        if (configuredModel && configuredModel !== 'gemini-3.8-flash' && requestedModel === 'gemini-3.8-flash') {
+            return configuredModel;
+        }
+        const modelToUse = requestedModel || activeModel;
+        if (modelToUse.startsWith('gemini-1.') || modelToUse.startsWith('gemini-2.') || modelToUse === 'gemini-3-flash-preview') {
+            return 'gemini-3.8-flash';
+        }
+        return modelToUse;
+    }
+
+    // For non-Google providers (OpenAI, Anthropic, Ollama, OpenRouter):
+    // Internal callers in the app often pass 'gemini-3.8-flash' by default.
+    // Replace Google-specific model identifiers with the user's active provider model.
+    if (!requestedModel || requestedModel.startsWith('gemini-')) {
+        return activeModel;
+    }
+
+    return requestedModel;
 };
 
 export const syncLlmSettingsFromServer = async (userId: string): Promise<LlmGlobalSettings | null> => {

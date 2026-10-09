@@ -11,14 +11,28 @@ import { ClearAllConfirmationModal } from './components/ClearAllConfirmationModa
 import { HelpModal } from './components/HelpModal';
 import { GlobalStyles } from './styles/GlobalStyles';
 import { DEFAULT_SPRINTS, TEMPLATES, DEFAULT_DOCUMENTS } from './constants/projectData';
+import {
+    DEFAULT_HARNESS_TASKS,
+    DEFAULT_MEMORY_NODES,
+    DEFAULT_TOT_NODES,
+    DEFAULT_CHALLENGE_REVIEWS,
+    DEFAULT_TRADE_STUDIES,
+    DEFAULT_BOM_ITEMS,
+    DEFAULT_ASSEMBLY_PACKAGES,
+    DEFAULT_OUTLINE_DOCUMENTS,
+    DEFAULT_GROUND_TRUTH_GATES,
+    DEFAULT_VOI_ITEMS,
+    DEFAULT_CONSISTENCY_ISSUES
+} from './constants/harnessDefaults';
 import { logAction } from './utils/logging';
 import { AuthView } from './views/AuthView';
 import * as authService from './utils/authService';
 import { subscribeToUpdates, notifyUpdate } from './utils/syncService';
+import { getDefaultResourceAllocations } from './constants/raciDefaults';
 import { Project, Task, Notification, User } from './types';
 import { saveProjectsToDB, loadProjectsFromDB, migrateFromLocalStorage, subscribeToRemoteChanges, deleteProjectFromDB, deleteAllProjectsFromDB } from './utils/storage';
 import { LlmProviderModal } from './components/LlmProviderModal';
-import { syncLlmSettingsFromServer } from './utils/llmStorage';
+import { syncLlmSettingsFromServer, applyUserApiKey } from './utils/llmStorage';
 
 const App = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -61,6 +75,9 @@ const App = () => {
       
       if (user) {
         logAction('Auth', 'App', { user: user.username });
+        if (user.geminiKey) {
+            applyUserApiKey(user.geminiKey, user.id);
+        }
         try {
             // Load initial data
             const dbProjects = await loadProjectsFromDB(user.id);
@@ -265,13 +282,16 @@ const App = () => {
         }
     }
     
+    const initialResources = getDefaultResourceAllocations();
+    const initialBudget = initialResources.reduce((sum, r) => sum + (r.totalCost || (r.unitCost * r.quantity) || 0), 0);
+
     const newProject: Project = { 
         id: Date.now().toString(), name, mode, scope, generationMode, isPlanSelected: true, teamSize, complexity: complexity || 'typical', discipline: template.discipline,
         ownerId: currentUser.id,
         phasesData: {},
         team: [{ userId: currentUser.id, role: 'Project Owner', name: currentUser.username, email: currentUser.email }],
-        documents: finalDocuments, tasks: [], sprints: JSON.parse(JSON.stringify(DEFAULT_SPRINTS)), milestones: [], resources: [],
-        avgBurdenedLaborRate: 125, budget: 100000,
+        documents: finalDocuments, tasks: [], sprints: JSON.parse(JSON.stringify(DEFAULT_SPRINTS)), milestones: [], resources: initialResources,
+        avgBurdenedLaborRate: 125, budget: initialBudget > 0 ? initialBudget : 100000,
         startDate: today.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0],
         changeRequest: { title: '', reason: '', impactStr: '' },
@@ -280,6 +300,17 @@ const App = () => {
             { id: 2, name: 'B: Defer feature', impactStr: '+0d +0c' },
         ],
         notifications: [],
+        harnessTasks: DEFAULT_HARNESS_TASKS,
+        memoryNodes: DEFAULT_MEMORY_NODES,
+        totNodes: DEFAULT_TOT_NODES,
+        challengeReviews: DEFAULT_CHALLENGE_REVIEWS,
+        tradeStudies: DEFAULT_TRADE_STUDIES,
+        bomItems: DEFAULT_BOM_ITEMS,
+        assemblyPackages: DEFAULT_ASSEMBLY_PACKAGES,
+        outlineDocuments: DEFAULT_OUTLINE_DOCUMENTS,
+        groundTruthGates: DEFAULT_GROUND_TRUTH_GATES,
+        voiItems: DEFAULT_VOI_ITEMS,
+        consistencyIssues: DEFAULT_CONSISTENCY_ISSUES,
     };
     const updatedProjects = [...projects, newProject];
     setProjects(updatedProjects);

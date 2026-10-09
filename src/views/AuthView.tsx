@@ -4,7 +4,7 @@ import { User } from '../types';
 import { RainbowText } from '../components/RainbowText';
 import { LlmProviderModal } from '../components/LlmProviderModal';
 import { MifecoStripeModal } from '../components/MifecoStripeModal';
-import { getLlmSettings } from '../utils/llmStorage';
+import { getLlmSettings, applyUserApiKey, detectProviderFromKey } from '../utils/llmStorage';
 
 import { 
     Cpu, 
@@ -123,6 +123,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             if (user) {
                 localStorage.setItem('mifeco-saved-email', user.email);
                 localStorage.setItem('mifeco-saved-username', user.username);
+                if (user.geminiKey) {
+                    applyUserApiKey(user.geminiKey, user.id);
+                }
                 onLogin(user);
             } else {
                 setError('ACCESS DENIED: Credentials not recognized. Please check your username and password.');
@@ -140,13 +143,24 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         setError('');
         setLoading(true);
         try {
+            if (!useInternalKey && signupGeminiKey.trim()) {
+                applyUserApiKey(signupGeminiKey);
+            }
             const newUser = await authService.register(signupUsername, signupEmail, signupPassword, useInternalKey ? undefined : signupGeminiKey);
             if (newUser) {
                 localStorage.setItem('mifeco-saved-email', signupEmail);
                 localStorage.setItem('mifeco-saved-username', signupUsername);
+                if (!useInternalKey && signupGeminiKey.trim()) {
+                    applyUserApiKey(signupGeminiKey, newUser.id);
+                }
                 
                 const user = await authService.login(signupEmail, signupPassword);
-                if (user) onLogin(user);
+                if (user) {
+                    if (user.geminiKey) {
+                        applyUserApiKey(user.geminiKey, user.id);
+                    }
+                    onLogin(user);
+                }
             } else {
                 setError('INIT_FAILED: Registration protocol rejected.');
             }
@@ -641,9 +655,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                         {!useInternalKey && (
                                             <div className="space-y-1 pt-1">
                                                 <div className="flex justify-between items-center">
-                                                    <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
-                                                        AI Provider & Key (Optional)
-                                                    </label>
+                                                    <div className="flex items-center gap-2">
+                                                        <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                                                            AI Provider & Key (Optional)
+                                                        </label>
+                                                        {signupGeminiKey.trim() && (
+                                                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 capitalize">
+                                                                {detectProviderFromKey(signupGeminiKey)}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     <button 
                                                         type="button"
                                                         onClick={() => setIsKeyModalOpen(true)}
@@ -660,7 +681,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                                     <input 
                                                         type="password" 
                                                         value={signupGeminiKey} 
-                                                        onChange={e => setSignupGeminiKey(e.target.value)} 
+                                                        onChange={e => {
+                                                            const val = e.target.value;
+                                                            setSignupGeminiKey(val);
+                                                            if (val.trim()) {
+                                                                applyUserApiKey(val);
+                                                            }
+                                                        }} 
                                                         placeholder="API Key or click 'Enter Key / Provider' above" 
                                                         className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all placeholder:text-slate-600 font-mono" 
                                                     />
