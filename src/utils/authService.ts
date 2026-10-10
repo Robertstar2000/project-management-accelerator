@@ -79,6 +79,36 @@ export const studioTestLogin = async (email?: string, username?: string): Promis
     }
 };
 
+export const byoLlmLogin = async (
+    provider: string,
+    model?: string,
+    apiKey?: string,
+    username?: string,
+    email?: string
+): Promise<User | null> => {
+    try {
+        const res = await fetch('/api/auth/byo-llm-login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({ provider, model, apiKey, username, email })
+        });
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || 'BYO LLM login failed');
+        }
+        const data = await res.json();
+        window.dispatchEvent(new Event('pm-auth-changed'));
+        return data.user || data;
+    } catch (e) {
+        console.error("BYO LLM login error:", e);
+        throw e;
+    }
+};
+
 export const logout = async (): Promise<void> => {
     try {
         await fetch('/api/auth/logout', {

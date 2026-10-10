@@ -490,6 +490,25 @@ async function startServer() {
 
   app.all(healthRoutes, handleHealth);
 
+  // Environment and AI Studio Development Detection Endpoint
+  app.get("/api/env/studio-status", (req: Request, res: Response) => {
+    const host = (req.headers.host || "").toLowerCase();
+    const service = (process.env.K_SERVICE || "").toLowerCase();
+    // Only available when the application is running on the same AI Studio as it is being developed on
+    const isAiStudioDev = (
+      host.includes("ais-dev-") ||
+      service.startsWith("ais-dev-") ||
+      host.includes("localhost") ||
+      host.includes("127.0.0.1")
+    ) && !host.includes("ais-pre-") && !service.startsWith("ais-pre-");
+
+    res.json({
+      isAiStudioDev,
+      service: process.env.K_SERVICE || "dev",
+      host,
+    });
+  });
+
   // -------------------------------------------------------------
   // Auth API Contract (Req 3, Req 4)
   // /api/auth/me MUST return JSON 401 when unauthenticated
@@ -616,6 +635,63 @@ async function startServer() {
     } catch (error: any) {
       structuredLog("ERROR", "Studio test login error", { error: error.message });
       res.status(500).json({ error: "Failed to initialize Studio test session" });
+    }
+  });
+
+  // BYO LLM Workspace Login (Activates session with user-provided engine or key)
+  app.post("/api/auth/byo-llm-login", async (req: Request, res: Response) => {
+    try {
+      const { provider = "google", model, apiKey, username, email } = req.body;
+      const cleanEmail = (email || `${provider}-workspace@mifeco.io`).trim().toLowerCase();
+      const cleanUsername = username || `${provider.charAt(0).toUpperCase() + provider.slice(1)} Workspace Architect`;
+
+      let user = await db.get("SELECT id, username, email, plan, stripeCustomerId, geminiKey FROM users WHERE email = ?", [cleanEmail]);
+      if (!user) {
+        const id = `byo-${provider}-${Date.now()}`;
+        const hashedPassword = await bcrypt.hash("byo-llm-access-2026", 10);
+        await db.run(
+          "INSERT INTO users (id, username, email, password, plan, geminiKey) VALUES (?, ?, ?, ?, ?, ?)",
+          [id, cleanUsername, cleanEmail, hashedPassword, "byo_llm", apiKey || null]
+        );
+        user = { id, username: cleanUsername, email: cleanEmail, plan: "byo_llm", geminiKey: apiKey || null };
+      } else if (apiKey) {
+        await db.run("UPDATE users SET geminiKey = ? WHERE id = ?", [apiKey, user.id]);
+        user.geminiKey = apiKey;
+      }
+
+      // If provider or model was provided, persist to user's llmConfig in database
+      if (provider) {
+        const targetModel = model || (provider === "grok" ? "grok-2-latest" : provider === "openai" ? "gpt-4o" : provider === "anthropic" ? "claude-3-7-sonnet-20250219" : "gemini-3.8-flash");
+        const configs: Record<string, any> = {
+          google: { provider: "google", authMode: "api_key", apiKey: provider === "google" ? (apiKey || "") : "", model: provider === "google" ? targetModel : "gemini-3.8-flash" },
+          openai: { provider: "openai", authMode: "api_key", apiKey: provider === "openai" ? (apiKey || "") : "", model: provider === "openai" ? targetModel : "gpt-4o" },
+          anthropic: { provider: "anthropic", authMode: "api_key", apiKey: provider === "anthropic" ? (apiKey || "") : "", model: provider === "anthropic" ? targetModel : "claude-3-7-sonnet-20250219" },
+          grok: { provider: "grok", authMode: "api_key", apiKey: provider === "grok" ? (apiKey || "") : "", model: provider === "grok" ? targetModel : "grok-2-latest" },
+          ollama: { provider: "ollama", authMode: "api_key", baseUrl: "http://localhost:11434", model: provider === "ollama" ? targetModel : "llama3.3" },
+          openrouter: { provider: "openrouter", authMode: "api_key", apiKey: provider === "openrouter" ? (apiKey || "") : "", model: provider === "openrouter" ? targetModel : "anthropic/claude-3.7-sonnet" },
+        };
+        const settingsPayload = { activeProvider: provider, configs, updatedAt: Date.now() };
+        await db.run("UPDATE users SET llmConfig = ? WHERE id = ?", [JSON.stringify(settingsPayload), user.id]);
+      }
+
+      const token = await createSession(user.id, res);
+      structuredLog("INFO", "BYO LLM workspace session initiated", { userId: user.id, provider, model });
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          plan: "byo_llm",
+          geminiKey: user.geminiKey,
+          notificationPrefs: {},
+        },
+        token,
+      });
+    } catch (error: any) {
+      structuredLog("ERROR", "BYO LLM login error", { error: error.message });
+      res.status(500).json({ error: "Failed to initialize BYO LLM workspace session" });
     }
   });
 
@@ -1167,6 +1243,25 @@ async function startServer() {
           latencyMs,
           model,
         });
+      } else if (provider === "grok") {
+        const effectiveKey = apiKey || process.env.XAI_API_KEY || process.env.GROK_API_KEY;
+        if (!effectiveKey) {
+          return res.status(400).json({ success: false, error: "xAI Grok API key is missing. Key should start with xai-..." });
+        }
+        const apiRes = await fetch("https://api.x.ai/v1/models", {
+          headers: { Authorization: `Bearer ${effectiveKey}` },
+        });
+        const data = await apiRes.json();
+        if (!apiRes.ok) {
+          throw new Error(data.error?.message || "Invalid xAI Grok API key.");
+        }
+        const latencyMs = Date.now() - startTime;
+        return res.json({
+          success: true,
+          message: `Connected successfully to xAI Grok. Verified access for ${model || "grok-2-latest"}.`,
+          latencyMs,
+          model: model || "grok-2-latest",
+        });
       } else {
         return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
       }
@@ -1292,18 +1387,22 @@ async function startServer() {
           text: result.text || "",
           candidates: result.candidates,
         });
-      } else if (provider === "openai" || provider === "openrouter") {
+      } else if (provider === "openai" || provider === "openrouter" || provider === "grok") {
         const isOR = provider === "openrouter";
-        const endpoint = isOR
+        const isGrok = provider === "grok";
+        const endpoint = isGrok
+          ? "https://api.x.ai/v1/chat/completions"
+          : isOR
           ? "https://openrouter.ai/api/v1/chat/completions"
           : "https://api.openai.com/v1/chat/completions";
-        const effectiveKey = apiKey || (isOR ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY);
+        const effectiveKey = apiKey || (isGrok ? (process.env.XAI_API_KEY || process.env.GROK_API_KEY) : isOR ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY);
 
         if (!effectiveKey) {
-          return res.status(400).json({ error: `${isOR ? "OpenRouter" : "OpenAI"} API key is required. Please configure your key in login or settings.` });
+          const provName = isGrok ? "xAI Grok" : isOR ? "OpenRouter" : "OpenAI";
+          return res.status(400).json({ error: `${provName} API key is required. Please configure your key in login or settings.` });
         }
 
-        const targetModel = model || (isOR ? "anthropic/claude-3.7-sonnet" : "gpt-4o");
+        const targetModel = model || (isGrok ? "grok-2-latest" : isOR ? "anthropic/claude-3.7-sonnet" : "gpt-4o");
         const isReasoning = targetModel.startsWith("o1") || targetModel.startsWith("o3");
 
         const headers: Record<string, string> = {

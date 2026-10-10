@@ -104,6 +104,7 @@ export const getActiveLlmConfig = (): ProviderConfig => {
  */
 export const detectProviderFromKey = (key: string): LlmProviderId => {
     const trimmed = (key || '').trim();
+    if (trimmed.startsWith('xai-')) return 'grok';
     if (trimmed.startsWith('sk-ant-')) return 'anthropic';
     if (trimmed.startsWith('sk-or-')) return 'openrouter';
     if (trimmed.startsWith('sk-')) return 'openai';

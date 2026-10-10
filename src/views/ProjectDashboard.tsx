@@ -958,6 +958,44 @@ export const ProjectDashboard: React.FC<{ project: Project; onBack: () => void; 
                 </div>
             </div>
 
+            {/* Active Model Capabilities Notice Banner */}
+            <div style={{
+                background: 'linear-gradient(90deg, rgba(6,182,212,0.08) 0%, rgba(30,41,59,0.6) 50%, rgba(99,102,241,0.08) 100%)',
+                border: '1px solid rgba(6,182,212,0.25)',
+                borderRadius: 'var(--radius)',
+                padding: '0.85rem 1.25rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                fontSize: '0.85rem'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <span style={{ 
+                        background: 'rgba(6,182,212,0.15)', 
+                        color: '#06b6d4', 
+                        padding: '0.2rem 0.6rem', 
+                        borderRadius: '6px', 
+                        fontWeight: 700, 
+                        fontSize: '0.7rem',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                    }}>
+                        Model Requirement Notice
+                    </span>
+                    <span style={{ color: 'var(--secondary-text)' }}>
+                        Chosen LLM model requires <strong style={{ color: '#fff' }}>high-level reasoning</strong>, deep <strong style={{ color: '#fff' }}>scientific and technical knowledge</strong>, and capability to generate <strong style={{ color: '#fff' }}>images, figures, tables, and drawings</strong> across the 9-Phase Autonomous Project Lifecycle.
+                    </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
+                        9-Phase Pipeline Active
+                    </span>
+                </div>
+            </div>
+
             {error && (
                 <div style={{ 
                     background: 'rgba(248, 113, 113, 0.1)', 

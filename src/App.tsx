@@ -34,6 +34,57 @@ import { saveProjectsToDB, loadProjectsFromDB, migrateFromLocalStorage, subscrib
 import { LlmProviderModal } from './components/LlmProviderModal';
 import { syncLlmSettingsFromServer, applyUserApiKey } from './utils/llmStorage';
 
+const createStarterProject = (user: User): Project => {
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 45);
+
+    const defaultTemplate = TEMPLATES.find(t => t.name.toLowerCase().includes('software')) || TEMPLATES[0];
+    const initialResources = getDefaultResourceAllocations();
+    const initialBudget = initialResources.reduce((sum, r) => sum + (r.totalCost || (r.unitCost * r.quantity) || 0), 0);
+
+    return {
+        id: `proj-${Date.now()}`,
+        name: 'MIFECO Autonomous Systems - 9-Phase Lifecycle',
+        mode: 'fullscale',
+        scope: 'internal',
+        generationMode: 'manual',
+        isPlanSelected: true,
+        teamSize: 'medium',
+        complexity: 'typical',
+        discipline: defaultTemplate?.discipline || 'Systems Engineering',
+        ownerId: user.id,
+        phasesData: {},
+        team: [{ userId: user.id, role: 'Project Owner', name: user.username, email: user.email }],
+        documents: JSON.parse(JSON.stringify(defaultTemplate?.documents || DEFAULT_DOCUMENTS)),
+        tasks: [],
+        sprints: JSON.parse(JSON.stringify(DEFAULT_SPRINTS)),
+        milestones: [],
+        resources: initialResources,
+        avgBurdenedLaborRate: 125,
+        budget: initialBudget > 0 ? initialBudget : 125000,
+        startDate: today.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+        changeRequest: { title: '', reason: '', impactStr: '' },
+        scenarios: [
+            { id: 1, name: 'A: Use contractors', impactStr: '+10d +8000c' },
+            { id: 2, name: 'B: Defer feature', impactStr: '+0d +0c' },
+        ],
+        notifications: [],
+        harnessTasks: DEFAULT_HARNESS_TASKS,
+        memoryNodes: DEFAULT_MEMORY_NODES,
+        totNodes: DEFAULT_TOT_NODES,
+        challengeReviews: DEFAULT_CHALLENGE_REVIEWS,
+        tradeStudies: DEFAULT_TRADE_STUDIES,
+        bomItems: DEFAULT_BOM_ITEMS,
+        assemblyPackages: DEFAULT_ASSEMBLY_PACKAGES,
+        outlineDocuments: DEFAULT_OUTLINE_DOCUMENTS,
+        groundTruthGates: DEFAULT_GROUND_TRUTH_GATES,
+        voiItems: DEFAULT_VOI_ITEMS,
+        consistencyIssues: DEFAULT_CONSISTENCY_ISSUES,
+    };
+};
+
 const App = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => localStorage.getItem('hmap-selected-project-id'));
@@ -56,6 +107,51 @@ const App = () => {
       if (!selectedProjectId || !projects) return null;
       return projects.find(p => p.id === selectedProjectId) || null;
   }, [projects, selectedProjectId]);
+  const advanceUserToPipeline = useCallback(async (user: User) => {
+    setIsAuthLoading(true);
+    setCurrentUser(user);
+    logAction('Auth', 'App', { user: user.username });
+    if (user.geminiKey) {
+      applyUserApiKey(user.geminiKey, user.id);
+    }
+    try {
+      // Load initial data
+      let dbProjects = await loadProjectsFromDB(user.id);
+      
+      // Check for local storage migration
+      const migrated = await migrateFromLocalStorage(user.id);
+      if (migrated && migrated.length > 0) {
+        dbProjects = migrated;
+      }
+
+      // Cleanly advance to app functionality and begin pipeline:
+      // If user has no existing projects, immediately initialize starter project with 9-Phase lifecycle & resources
+      if (!dbProjects || dbProjects.length === 0) {
+        const starterProject = createStarterProject(user);
+        await saveProjectsToDB([starterProject], user.id);
+        dbProjects = [starterProject];
+      }
+
+      setProjects(dbProjects);
+
+      // Cleanly advance to pipeline: select active project and open ProjectDashboard
+      const storedSelectedId = localStorage.getItem('hmap-selected-project-id');
+      const projectToSelect = (storedSelectedId ? dbProjects.find(p => p.id === storedSelectedId) : null) || dbProjects[0];
+      if (projectToSelect) {
+        setSelectedProjectId(projectToSelect.id);
+        localStorage.setItem('hmap-selected-project-id', projectToSelect.id);
+        setIsSettingUp(false);
+      }
+
+      // Sync remote LLM provider settings
+      await syncLlmSettingsFromServer(user.id);
+    } catch (e) {
+      console.error("Data loading error:", e);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     // Safety timeout: If auth takes too long (e.g., firebase script failure), allow the app to render the login screen.
     const safetyTimeout = setTimeout(() => {
@@ -70,38 +166,20 @@ const App = () => {
 
     const unsubscribeAuth = authService.onAuthStateChanged(async (user) => {
       clearTimeout(safetyTimeout);
-      setCurrentUser(user);
-      setIsAuthLoading(false);
-      
       if (user) {
-        logAction('Auth', 'App', { user: user.username });
-        if (user.geminiKey) {
-            applyUserApiKey(user.geminiKey, user.id);
-        }
-        try {
-            // Load initial data
-            const dbProjects = await loadProjectsFromDB(user.id);
-            setProjects(dbProjects);
-            
-            // Check for local storage migration
-            const migrated = await migrateFromLocalStorage(user.id);
-            if (migrated) setProjects(migrated);
-
-            // Sync remote LLM provider settings
-            await syncLlmSettingsFromServer(user.id);
-        } catch (e) {
-            console.error("Data loading error:", e);
-        }
+        await advanceUserToPipeline(user);
       } else {
+        setCurrentUser(null);
         setProjects([]);
         setSelectedProjectId(null);
+        setIsAuthLoading(false);
       }
     });
     return () => {
         clearTimeout(safetyTimeout);
         unsubscribeAuth();
     };
-  }, []);
+  }, [advanceUserToPipeline]);
 
   // --- Remote Sync Logic ---
   useEffect(() => {
@@ -400,7 +478,7 @@ const App = () => {
         <style>{GlobalStyles}</style>
 
         {!currentUser ? (
-            <AuthView onLogin={(user) => setCurrentUser(user)} />
+            <AuthView onLogin={advanceUserToPipeline} />
         ) : (
             <>
                 <Header 

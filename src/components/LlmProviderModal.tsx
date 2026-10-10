@@ -23,21 +23,26 @@ import {
     Loader2, 
     RefreshCw,
     Link as LinkIcon,
-    Unlink
+    Unlink,
+    BrainCircuit,
+    ArrowRight
 } from 'lucide-react';
+import * as authService from '../utils/authService';
 
 interface LlmProviderModalProps {
     isOpen: boolean;
     onClose: () => void;
     currentUser?: User | null;
     initialProvider?: LlmProviderId;
+    onLogin?: (user: User) => void;
 }
 
 export const LlmProviderModal: React.FC<LlmProviderModalProps> = ({
     isOpen,
     onClose,
     currentUser,
-    initialProvider
+    initialProvider,
+    onLogin
 }) => {
     const [settings, setSettings] = useState<LlmGlobalSettings>(() => getLlmSettings());
     const [selectedProviderId, setSelectedProviderId] = useState<LlmProviderId>('google');
@@ -194,6 +199,19 @@ export const LlmProviderModal: React.FC<LlmProviderModalProps> = ({
             };
             saveLlmSettings(updatedSettings, currentUser?.id);
             setSettings(updatedSettings);
+
+            // If user is authenticating through Provide Your Own LLM / Key from Auth screen
+            if (!currentUser && onLogin) {
+                const currentCfg = updatedSettings.configs[selectedProviderId];
+                const loggedInUser = await authService.byoLlmLogin(
+                    selectedProviderId,
+                    currentCfg?.model,
+                    currentCfg?.apiKey
+                );
+                if (loggedInUser) {
+                    onLogin(loggedInUser);
+                }
+            }
             
             // Brief visual delay for user feedback
             setTimeout(() => {
@@ -243,6 +261,44 @@ export const LlmProviderModal: React.FC<LlmProviderModalProps> = ({
                 {/* Modal Body: Two column layout for desktop */}
                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
                     
+                    {/* User Notification: LLM Model Capability Requirements */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-950/50 via-slate-900/90 to-indigo-950/50 border border-cyan-500/40 text-slate-200 space-y-3 shadow-lg shadow-cyan-500/5">
+                        <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300 shrink-0 mt-0.5">
+                                <Sparkles className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h4 className="text-xs sm:text-sm font-bold text-white tracking-wide uppercase">
+                                        Model Capability Requirement Notice
+                                    </h4>
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
+                                        9-Phase Autonomous Engine
+                                    </span>
+                                </div>
+                                <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                                    The chosen LLM model needs to have <strong className="text-cyan-300 font-semibold">high-level reasoning</strong>, deep <strong className="text-indigo-300 font-semibold">scientific and technical knowledge</strong>, and be able to generate <strong className="text-emerald-300 font-semibold">images, figures, tables, and drawings</strong> across all project lifecycle phases.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Feature Requirement Badges */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-800/80 text-[11px]">
+                            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-300">
+                                <BrainCircuit className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                                <span>High-Level Reasoning & RACI</span>
+                            </div>
+                            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-300">
+                                <Cpu className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                <span>Scientific & Technical Knowledge</span>
+                            </div>
+                            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-300">
+                                <Layers className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span>Images, Figures, Tables & Drawings</span>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Active Provider Indicator Bar */}
                     <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80">
                         <div className="flex items-center gap-2 text-xs">
@@ -271,10 +327,10 @@ export const LlmProviderModal: React.FC<LlmProviderModalProps> = ({
                                 <Cpu className="w-3.5 h-3.5 text-cyan-400" />
                                 <span>1. Select LLM Provider</span>
                             </label>
-                            <span className="text-[11px] text-slate-400">Choose from 5 industry engines</span>
+                            <span className="text-[11px] text-slate-400">Choose from 6 industry frontier engines</span>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                             {PROVIDER_LIST.map((pId) => {
                                 const prov = LLM_PROVIDERS[pId];
                                 const isSelected = selectedProviderId === pId;
@@ -689,7 +745,12 @@ export const LlmProviderModal: React.FC<LlmProviderModalProps> = ({
                             {isSaving ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin" />
-                                    <span>Applying...</span>
+                                    <span>{!currentUser ? 'Launching Workspace...' : 'Applying...'}</span>
+                                </>
+                            ) : !currentUser ? (
+                                <>
+                                    <span>Activate & Enter Workspace</span>
+                                    <ArrowRight className="w-4 h-4" />
                                 </>
                             ) : (
                                 <>

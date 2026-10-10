@@ -432,7 +432,7 @@ export interface ValueInformationItem {
     rankPriority: number;
 }
 
-export type LlmProviderId = 'google' | 'openai' | 'anthropic' | 'ollama' | 'openrouter';
+export type LlmProviderId = 'google' | 'openai' | 'anthropic' | 'grok' | 'ollama' | 'openrouter';
 export type AuthMode = 'api_key' | 'oauth';
 
 export interface ModelOption {

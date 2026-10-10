@@ -46,16 +46,17 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
     const [isStripeModalOpen, setIsStripeModalOpen] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
-    // AI Studio Environment Detection (Only shows Studio Test Login in AI Studio)
-    const isAiStudio = typeof window !== 'undefined' && (
-        window.location.hostname.includes('ais-') ||
-        window.location.hostname.includes('run.app') ||
-        window.location.hostname.includes('aistudio') ||
-        window.location.hostname.includes('localhost') ||
-        window.self !== window.top ||
-        window.location.search.includes('studio')
-    );
-
+    // AI Studio Developer Testing Option:
+    // Only available when the application is running on the same AI Studio as it is being developed on.
+    // Strictly excluded on shared preview (ais-pre-) and public/external deployments.
+    const [isAiStudioDev, setIsAiStudioDev] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false;
+        const h = window.location.hostname;
+        return (
+            (h.includes('ais-dev-') || h === 'localhost' || h === '127.0.0.1' || window.location.search.includes('studio_dev')) &&
+            !h.includes('ais-pre-')
+        );
+    });
 
     // Signup state
     const [signupEmail, setSignupEmail] = useState('');
@@ -89,6 +90,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
             setEmailOrUsername(storedEmail || storedUsername);
         }
         setUseInternalKey(storedInternalKeyFlag);
+
+        // Verify with server environment status
+        fetch('/api/env/studio-status')
+            .then(res => res.json())
+            .then(data => {
+                if (data && typeof data.isAiStudioDev === 'boolean') {
+                    setIsAiStudioDev(data.isAiStudioDev);
+                }
+            })
+            .catch(() => {});
     }, []);
 
     const scrollToAuth = (tab: 'signin' | 'signup') => {
@@ -208,14 +219,40 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
         setError('');
         setLoading(true);
         try {
+            // Skips both paid access, Provide your own LLM, and provide a key
+            localStorage.setItem('mifeco-use-internal-key', 'true');
             const user = await authService.studioTestLogin('robertstar2000@gmail.com', 'AI Studio Architect');
             if (user) {
-                localStorage.setItem('mifeco-use-internal-key', 'true');
                 onLogin(user);
             }
         } catch (err: any) {
             console.error(err);
             setError(`STUDIO_TEST_ERR: ${err.message || "Failed to initialize Studio test session"}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleEnterWithKey = async (apiKey: string) => {
+        const cleanKey = apiKey.trim();
+        if (!cleanKey) {
+            setError("Please enter a valid API key.");
+            return;
+        }
+        setError('');
+        setLoading(true);
+        try {
+            applyUserApiKey(cleanKey);
+            const provider = detectProviderFromKey(cleanKey);
+            const user = await authService.byoLlmLogin(provider, undefined, cleanKey);
+            if (user) {
+                localStorage.setItem('mifeco-saved-email', user.email);
+                localStorage.setItem('mifeco-saved-username', user.username);
+                onLogin(user);
+            }
+        } catch (err: any) {
+            console.error(err);
+            setError(`KEY_LOGIN_ERR: ${err.message || "Could not launch session with provided key"}`);
         } finally {
             setLoading(false);
         }
@@ -281,16 +318,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
 
                     {/* Action CTAs */}
                     <div className="flex items-center gap-2 sm:gap-2.5">
-                        {isAiStudio && (
+                        {isAiStudioDev && (
                             <button
                                 onClick={handleStudioTestLogin}
                                 disabled={loading}
                                 className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-indigo-500 hover:from-cyan-300 hover:to-indigo-400 text-slate-950 text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
-                                title="1-Click test login using Studio Gemini Key"
+                                title="Developer testing only: 1-Click test login using Studio Gemini Key (Skips payments and key prompts)"
                             >
                                 <Sparkles className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Studio Test Login</span>
-                                <span className="sm:hidden">Studio</span>
+                                <span className="hidden sm:inline">Studio Dev Test</span>
+                                <span className="sm:hidden">Dev Test</span>
                             </button>
                         )}
                         <button
@@ -404,8 +441,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                     </div>
                                 </div>
 
-                                {/* CONDITIONAL: AI Studio Test Login (ONLY appears when run in AI Studio) */}
-                                {isAiStudio && (
+                                {/* CONDITIONAL: AI Studio Test Login (ONLY exists when running on the development AI Studio) */}
+                                {isAiStudioDev && (
                                     <div className="mb-5 p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-slate-900 to-indigo-950/80 border border-cyan-500/40 shadow-lg shadow-cyan-500/10">
                                         <div className="flex items-center justify-between gap-2 mb-1.5">
                                             <div className="flex items-center gap-2">
@@ -413,15 +450,15 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                                     <Sparkles className="w-3.5 h-3.5" />
                                                 </div>
                                                 <span className="text-xs font-bold text-white">
-                                                    AI Studio Environment Detected
+                                                    AI Studio Development Workspace Detected
                                                 </span>
                                             </div>
                                             <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-cyan-400/20 text-cyan-300 border border-cyan-400/30">
-                                                Studio Key
+                                                Developer Test Only
                                             </span>
                                         </div>
                                         <p className="text-[11px] text-slate-300 leading-snug mb-2.5">
-                                            Developer test session: authenticates immediately using the container&apos;s Studio Gemini Key.
+                                            Developer test session: only available in this AI Studio development environment. When engaged, skips paid access, Provide your own LLM, and provide a key.
                                         </p>
                                         <button
                                             type="button"
@@ -432,12 +469,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                             {loading ? (
                                                 <>
                                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                    <span>Launching Studio Mode...</span>
+                                                    <span>Launching Studio Developer Mode...</span>
                                                 </>
                                             ) : (
                                                 <>
                                                     <Zap className="w-3.5 h-3.5 text-slate-950" />
-                                                    <span>Studio Test Login (Uses Studio Gemini Key)</span>
+                                                    <span>Engage Studio Developer Access (Skip Keys & Paywalls)</span>
                                                 </>
                                             )}
                                         </button>
@@ -445,8 +482,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                 )}
 
                                 {/* Access Pathways: Demo Free (BYO LLM) vs Mifeco Business (Stripe Authority) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-5">
-                                    {/* Demo Free Tier */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+                                    {/* Demo Free Tier / BYO LLM */}
                                     <div 
                                         onClick={() => setIsKeyModalOpen(true)}
                                         className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-cyan-500/50 cursor-pointer transition-all flex flex-col justify-between group"
@@ -462,11 +499,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                                 Provide Your Own LLM
                                             </div>
                                             <p className="text-[10px] text-slate-400 leading-snug mt-1">
-                                                Free access with Google, OpenAI, Anthropic, Ollama, or OpenRouter.
+                                                Free access with Google Gemini, OpenAI, Anthropic, xAI Grok, OpenRouter, or Ollama.
                                             </p>
                                         </div>
                                         <div className="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                                            <span className="font-semibold text-cyan-400 group-hover:underline">Configure LLM Key →</span>
+                                            <span className="font-semibold text-cyan-400 group-hover:underline">Configure LLM Engine →</span>
                                         </div>
                                     </div>
 
@@ -502,6 +539,19 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                                 Live Payment Link
                                             </a>
                                         </div>
+                                    </div>
+                                </div>
+
+                                {/* Model Capability Requirement Notice Banner */}
+                                <div className="mb-5 p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-slate-300 text-xs flex items-start gap-2.5">
+                                    <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                                    <div className="leading-snug">
+                                        <span className="font-bold uppercase text-[10px] tracking-wider block mb-0.5 text-cyan-300">
+                                            Model Requirement Notice
+                                        </span>
+                                        <span>
+                                            The LLM model chosen needs to have <strong className="text-white">high-level reasoning</strong>, deep <strong className="text-white">scientific and technical knowledge</strong>, and be able to generate <strong className="text-white">images, figures, tables, and drawings</strong> across the 9-phase project lifecycle.
+                                        </span>
                                     </div>
                                 </div>
 
@@ -692,6 +742,20 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                                         className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition-all placeholder:text-slate-600 font-mono" 
                                                     />
                                                 </div>
+                                                {signupGeminiKey.trim() && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEnterWithKey(signupGeminiKey)}
+                                                        disabled={loading}
+                                                        className="w-full mt-2 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all"
+                                                    >
+                                                        <span>Enter Workspace with Provided Key</span>
+                                                        <ArrowRight className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                                <p className="text-[10px] text-slate-400 leading-tight pt-1">
+                                                    Notice: Selected LLM model needs high-level reasoning, scientific & technical knowledge, and capability to generate images, figures, tables, and drawings.
+                                                </p>
                                             </div>
                                         )}
 
@@ -738,15 +802,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                                             <CreditCard className="w-3 h-3" />
                                             <span>Stripe Authority ($49)</span>
                                         </button>
-                                        {isAiStudio && (
+                                        {isAiStudioDev && (
                                             <button
                                                 type="button"
                                                 onClick={handleStudioTestLogin}
                                                 disabled={loading}
                                                 className="text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 hover:underline"
+                                                title="Developer test only in AI Studio workspace"
                                             >
                                                 <Sparkles className="w-3 h-3" />
-                                                <span>Studio Test Login</span>
+                                                <span>Studio Dev Test</span>
                                             </button>
                                         )}
                                     </div>
@@ -1193,6 +1258,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLogin }) => {
                         setSignupGeminiKey(activeCfg.apiKey);
                     }
                 }}
+                onLogin={(user) => onLogin(user)}
             />
 
             {/* Mifeco Business Stripe Authority Modal */}
