@@ -1,3 +1,4 @@
+import { installPaymentLinks } from './server/paymentLinks.mjs';
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
@@ -167,8 +168,8 @@ async function runDatabaseMigrations(db: Database) {
     structuredLog("INFO", "Applied migration 004: Multi-product entitlements initialized");
   }
 
-  // Seed standard test accounts for entitlement verification
-  try {
+  // Seed test accounts only in an explicitly enabled development environment.
+  if (process.env.NODE_ENV === 'development' && process.env.ENABLE_TEST_ACCOUNTS === 'true') try {
     const testAccounts = [
       { id: "test-user-nolicense", email: "no-license-user@mifeco.internal", username: "NoLicenseUser", plan: "free", entitlement: null },
       { id: "test-user-active", email: "active-license-user@mifeco.internal", username: "ActiveUser", plan: "business", entitlement: { product: "pm-accelerator", plan: "business", status: "active", expiresAt: Date.now() + 365 * 24 * 3600 * 1000 } },
@@ -212,7 +213,7 @@ async function startServer() {
     credentials: true,
   }));
   app.use(cookieParser());
-  app.use(express.json({ limit: "50mb" }));
+  app.use((req, res, next) => req.path === '/api/billing/stripe-webhook' ? next() : express.json({ limit: '50mb' })(req, res, next));
 
   // Correlation ID and Cloud Logging Middleware
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -260,6 +261,7 @@ async function startServer() {
       );
 
       if (!row) return null;
+      if (process.env.NODE_ENV === 'production' && row.id.startsWith('test-user-')) return null;
 
       // Check expiration
       if (row.expiresAt < Date.now()) {
@@ -279,6 +281,18 @@ async function startServer() {
       return null;
     }
   }
+
+  const { requirePaid, verify: verifyBilling } = await installPaymentLinks(app, {
+    authenticate: getAuthenticatedUser, product: 'pm-accelerator',
+    paymentLink: 'https://buy.stripe.com/aFabJ2euL2zA5DYfes7Vm03',
+  });
+  app.use(['/api/auth/studio-test-login', '/api/auth/byo-llm-login'], (_req, res, next) => {
+    if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Endpoint not available' });
+    next();
+  });
+  // Server-funded AI always requires a verified subscription; caller-owned keys remain usable.
+  const fundedRoutes = ['/api/gemini/generate', '/api/llm/generate', '/api/llm/test-connection'];
+  app.use(fundedRoutes, (req, res, next) => typeof req.body?.apiKey === 'string' && req.body.apiKey.trim() ? next() : requirePaid(req, res, next));
 
   // Auth Middleware for protected endpoints
   async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -541,7 +555,7 @@ async function startServer() {
     try {
       const id = `user-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
       const hashedPassword = await bcrypt.hash(password, 10);
-      const userPlan = plan || "free";
+      const userPlan = "free"; // Paid access comes only from verified Stripe subscriptions.
 
       await db.run(
         "INSERT INTO users (id, username, email, password, geminiKey, plan) VALUES (?, ?, ?, ?, ?, ?)",
@@ -711,135 +725,31 @@ async function startServer() {
     res.json({ success: true, message: "Logged out successfully" });
   });
 
-  // -------------------------------------------------------------
-  // Stripe Authority & Webhooks & Entitlements (Req 6)
-  // -------------------------------------------------------------
-  app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
-    const { email, username, planType } = req.body;
-    const priceAmount = planType === "annual" ? 490 : 49;
-    const sessionId = `cs_stripe_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-
-    res.json({
-      success: true,
-      sessionId,
-      authority: "Mifeco Business Stripe Billing Authority",
-      planType: planType || "monthly",
-      amountDue: priceAmount,
-      currency: "usd",
-      customerEmail: email,
-      paymentLink: "https://buy.stripe.com/test_pm_accelerator_business",
+  // Billing containment: never issue access from client-supplied payment claims.
+  // Keep these endpoints non-successful until verified Stripe fulfillment is installed.
+  // Webhook 503 responses deliberately preserve Stripe's retry behavior.
+  app.post("/api/stripe/create-checkout-session", (_req: Request, res: Response) => {
+    res.status(503).json({
+      success: false,
+      code: "BILLING_INTEGRATION_PENDING",
+      error: "In-app checkout is unavailable. Review current plans through MIFECO.",
+      purchaseUrl: "https://www.mifeco.com/saas/#accelerator",
     });
   });
 
-  app.post("/api/stripe/confirm-payment", async (req: Request, res: Response) => {
-    const { email, username, password, sessionId, planType } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: "Missing email address" });
-    }
-
-    try {
-      const stripeCustomerId = `cus_stripe_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-      const normalizedEmail = email.trim().toLowerCase();
-      let user = await db.get("SELECT id, username, email FROM users WHERE email = ?", [normalizedEmail]);
-
-      if (user) {
-        await db.run(
-          "UPDATE users SET plan = ?, stripeCustomerId = ? WHERE id = ?",
-          ["business", stripeCustomerId, user.id]
-        );
-        user.plan = "business";
-        user.stripeCustomerId = stripeCustomerId;
-      } else {
-        const id = `user-biz-${Date.now()}`;
-        const finalUsername = username || normalizedEmail.split("@")[0];
-        const hashedPassword = await bcrypt.hash(password || "mifeco-biz-2026", 10);
-        await db.run(
-          "INSERT INTO users (id, username, email, password, plan, stripeCustomerId) VALUES (?, ?, ?, ?, ?, ?)",
-          [id, finalUsername, normalizedEmail, hashedPassword, "business", stripeCustomerId]
-        );
-        user = { id, username: finalUsername, email: normalizedEmail, plan: "business", stripeCustomerId };
-      }
-
-      // Record entitlement in durable store
-      await db.run(
-        `INSERT OR REPLACE INTO entitlements (userId, plan, status, source, stripeCustomerId, expiresAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [user.id, "business", "active", "stripe_authority_confirmation", stripeCustomerId, Date.now() + 365 * 24 * 3600 * 1000, Date.now()]
-      );
-
-      // Create session for immediate access
-      const token = await createSession(user.id, res);
-
-      structuredLog("INFO", "Stripe payment confirmed and Business Tier unlocked", {
-        userId: user.id,
-        email: normalizedEmail,
-        planType,
-      });
-
-      res.json({
-        success: true,
-        user: { ...user, notificationPrefs: {} },
-        token,
-        receiptNumber: `RCPT-${Math.floor(100000 + Math.random() * 900000)}`,
-        message: "Payment successfully verified by Mifeco Stripe Authority. PM Accelerator Business tier unlocked!",
-      });
-    } catch (err: any) {
-      structuredLog("ERROR", "Stripe payment confirmation error", { error: err.message });
-      res.status(500).json({ error: "Failed to confirm payment with Stripe Authority" });
-    }
+  app.post("/api/stripe/confirm-payment", (_req: Request, res: Response) => {
+    res.status(503).json({
+      success: false,
+      code: "PAYMENT_VERIFICATION_UNAVAILABLE",
+      error: "Payment cannot be confirmed here. No account or access has been changed.",
+    });
   });
 
-  // Signed, Idempotent Stripe Webhook Path (Req 6)
-  app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
-    const event = req.body;
-    const eventId = event?.id || `evt_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-    const eventType = event?.type || "checkout.session.completed";
-
-    try {
-      // 1. Check idempotency: avoid duplicate event processing
-      const existing = await db.get("SELECT id FROM stripe_events WHERE id = ?", [eventId]);
-      if (existing) {
-        structuredLog("INFO", "Stripe webhook event already processed (idempotent)", { eventId });
-        return res.status(200).json({ received: true, idempotent: true });
-      }
-
-      // 2. Record event in durable store
-      await db.run(
-        "INSERT INTO stripe_events (id, eventType, processedAt, payload) VALUES (?, ?, ?, ?)",
-        [eventId, eventType, Date.now(), JSON.stringify(event)]
-      );
-
-      // 3. Process entitlement updates
-      const customerEmail = event?.data?.object?.customer_email || event?.customer_email || event?.email;
-      const stripeCustomerId = event?.data?.object?.customer || event?.customer_id;
-
-      if (customerEmail) {
-        const user = await db.get("SELECT id FROM users WHERE email = ?", [customerEmail.toLowerCase()]);
-        if (user) {
-          const isCancellation = eventType === "customer.subscription.deleted";
-          const newPlan = isCancellation ? "free" : "business";
-          const status = isCancellation ? "canceled" : "active";
-
-          await db.run(
-            "UPDATE users SET plan = ?, stripeCustomerId = ? WHERE id = ?",
-            [newPlan, stripeCustomerId || null, user.id]
-          );
-
-          await db.run(
-            `INSERT OR REPLACE INTO entitlements (userId, plan, status, source, stripeCustomerId, expiresAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [user.id, newPlan, status, "stripe_webhook", stripeCustomerId, Date.now() + 30 * 24 * 3600 * 1000, Date.now()]
-          );
-
-          structuredLog("INFO", `Updated user entitlement from webhook ${eventType}`, { userId: user.id, newPlan });
-        }
-      }
-
-      res.status(200).json({ success: true, processed: true, eventId });
-    } catch (err: any) {
-      structuredLog("ERROR", "Stripe webhook handling error", { error: err.message, eventId });
-      res.status(500).json({ error: "Webhook processing failed" });
-    }
+  app.post("/api/stripe/webhook", (_req: Request, res: Response) => {
+    res.status(503).json({
+      received: false,
+      code: "STRIPE_FULFILLMENT_NOT_CONFIGURED",
+    });
   });
 
   // -------------------------------------------------------------
@@ -853,131 +763,9 @@ async function startServer() {
   // -------------------------------------------------------------
   const VALID_PRODUCTS = ["pm-accelerator", "pm_accelerator", "pm", "mifeco-pm-accelerator", "mifeco_pm"];
 
-  const handleEntitlementVerification = async (req: Request, res: Response) => {
-    try {
-      // 1. Session check: if no session, 401
-      const user = req.user;
-      if (!user) {
-        return res.status(401).json({
-          error: "Unauthorized",
-          authenticated: false,
-          allowed: false,
-          message: "No session provided",
-        });
-      }
-
-      // Simulation overrides for verification testing
-      const sim = (req.query.simulate || req.headers["x-simulate-entitlement"] || req.body?.simulate || "").toString().toLowerCase().trim();
-      if (sim === "no_license" || sim === "unlicensed") {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "NO_LICENSE",
-          allowed: false,
-          message: "Authenticated without license: user does not have an active product license",
-        });
-      }
-      if (sim === "wrong_product") {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "WRONG_PRODUCT",
-          allowed: false,
-          message: "Wrong product: license does not grant access to 'pm-accelerator'",
-        });
-      }
-      if (sim === "expired" || sim === "canceled" || sim === "unpaid" || sim === "past_due") {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "LICENSE_INACTIVE",
-          allowed: false,
-          status: sim,
-          message: `License is ${sim}`,
-        });
-      }
-      if (sim === "active" || sim === "allowed") {
-        return res.status(200).json({
-          allowed: true,
-          status: "active",
-          product: "pm-accelerator",
-          plan: "business",
-          userId: user.id,
-          message: "Access granted for product pm-accelerator",
-        });
-      }
-
-      // Check requested product param
-      const requestedProduct = (req.query.product || req.headers["x-product-id"] || req.body?.product || "").toString().toLowerCase().trim();
-      if (requestedProduct && !VALID_PRODUCTS.includes(requestedProduct)) {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "WRONG_PRODUCT",
-          allowed: false,
-          message: `Wrong product: requested '${requestedProduct}', but this application requires 'pm-accelerator'`,
-        });
-      }
-
-      // Lookup user and entitlement in SQLite
-      const entitlement = await db.get("SELECT * FROM entitlements WHERE userId = ?", [user.id]);
-      const userRecord = await db.get("SELECT plan, stripeCustomerId FROM users WHERE id = ?", [user.id]);
-      const plan = (userRecord?.plan || user.plan || "free").toLowerCase();
-
-      // Check if user has an active license
-      const hasEntitlement = !!entitlement;
-      const isLicensedPlan = plan === "business" || plan === "pro" || plan === "studio_test" || plan === "enterprise";
-
-      if (!hasEntitlement && !isLicensedPlan) {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "NO_LICENSE",
-          allowed: false,
-          message: "Authenticated without license: user does not have an active product license",
-        });
-      }
-
-      // Check product on the entitlement record
-      if (entitlement?.product) {
-        const entProduct = entitlement.product.toLowerCase().trim();
-        if (!VALID_PRODUCTS.includes(entProduct)) {
-          return res.status(403).json({
-            error: "Forbidden",
-            code: "WRONG_PRODUCT",
-            allowed: false,
-            message: `Wrong product: license is for '${entitlement.product}', not 'pm-accelerator'`,
-          });
-        }
-      }
-
-      // Check status: expired / canceled / unpaid
-      const status = (entitlement?.status || "active").toLowerCase().trim();
-      const isInactiveStatus = status === "expired" || status === "canceled" || status === "unpaid" || status === "past_due";
-      const isTimeExpired = entitlement?.expiresAt && Number(entitlement.expiresAt) < Date.now();
-
-      if (isInactiveStatus || isTimeExpired) {
-        return res.status(403).json({
-          error: "Forbidden",
-          code: "LICENSE_INACTIVE",
-          allowed: false,
-          status: isTimeExpired ? "expired" : status,
-          message: `License is ${isTimeExpired ? "expired" : status}`,
-          expiresAt: entitlement?.expiresAt,
-        });
-      }
-
-      // Correct active product -> allowed
-      return res.status(200).json({
-        allowed: true,
-        status: "active",
-        product: "pm-accelerator",
-        plan: entitlement?.plan || plan,
-        userId: user.id,
-        authority: "Mifeco Business Stripe Billing Authority",
-        verifiedAt: new Date().toISOString(),
-        message: "Access granted for product pm-accelerator",
-      });
-    } catch (err: any) {
-      structuredLog("ERROR", "Entitlement check error", { error: err.message });
-      return res.status(500).json({ error: "Failed to verify entitlement state" });
-    }
-  };
+  async function handleEntitlementVerification(req: Request, res: Response) {
+    return verifyBilling(req, res);
+  }
 
   app.get("/api/entitlements/verify", requireAuth, handleEntitlementVerification);
   app.post("/api/entitlements/verify", requireAuth, handleEntitlementVerification);
@@ -1687,3 +1475,4 @@ startServer().catch((err) => {
   structuredLog("ERROR", "Fatal server startup error", { error: err.message, stack: err.stack });
   process.exit(1);
 });
+
