@@ -711,135 +711,31 @@ async function startServer() {
     res.json({ success: true, message: "Logged out successfully" });
   });
 
-  // -------------------------------------------------------------
-  // Stripe Authority & Webhooks & Entitlements (Req 6)
-  // -------------------------------------------------------------
-  app.post("/api/stripe/create-checkout-session", async (req: Request, res: Response) => {
-    const { email, username, planType } = req.body;
-    const priceAmount = planType === "annual" ? 490 : 49;
-    const sessionId = `cs_stripe_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-
-    res.json({
-      success: true,
-      sessionId,
-      authority: "Mifeco Business Stripe Billing Authority",
-      planType: planType || "monthly",
-      amountDue: priceAmount,
-      currency: "usd",
-      customerEmail: email,
-      paymentLink: "https://buy.stripe.com/test_pm_accelerator_business",
+  // Billing containment: never issue access from client-supplied payment claims.
+  // Keep these endpoints non-successful until verified Stripe fulfillment is installed.
+  // Webhook 503 responses deliberately preserve Stripe's retry behavior.
+  app.post("/api/stripe/create-checkout-session", (_req: Request, res: Response) => {
+    res.status(503).json({
+      success: false,
+      code: "BILLING_INTEGRATION_PENDING",
+      error: "In-app checkout is unavailable. Review current plans through MIFECO.",
+      purchaseUrl: "https://www.mifeco.com/saas/#accelerator",
     });
   });
 
-  app.post("/api/stripe/confirm-payment", async (req: Request, res: Response) => {
-    const { email, username, password, sessionId, planType } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: "Missing email address" });
-    }
-
-    try {
-      const stripeCustomerId = `cus_stripe_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-      const normalizedEmail = email.trim().toLowerCase();
-      let user = await db.get("SELECT id, username, email FROM users WHERE email = ?", [normalizedEmail]);
-
-      if (user) {
-        await db.run(
-          "UPDATE users SET plan = ?, stripeCustomerId = ? WHERE id = ?",
-          ["business", stripeCustomerId, user.id]
-        );
-        user.plan = "business";
-        user.stripeCustomerId = stripeCustomerId;
-      } else {
-        const id = `user-biz-${Date.now()}`;
-        const finalUsername = username || normalizedEmail.split("@")[0];
-        const hashedPassword = await bcrypt.hash(password || "mifeco-biz-2026", 10);
-        await db.run(
-          "INSERT INTO users (id, username, email, password, plan, stripeCustomerId) VALUES (?, ?, ?, ?, ?, ?)",
-          [id, finalUsername, normalizedEmail, hashedPassword, "business", stripeCustomerId]
-        );
-        user = { id, username: finalUsername, email: normalizedEmail, plan: "business", stripeCustomerId };
-      }
-
-      // Record entitlement in durable store
-      await db.run(
-        `INSERT OR REPLACE INTO entitlements (userId, plan, status, source, stripeCustomerId, expiresAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [user.id, "business", "active", "stripe_authority_confirmation", stripeCustomerId, Date.now() + 365 * 24 * 3600 * 1000, Date.now()]
-      );
-
-      // Create session for immediate access
-      const token = await createSession(user.id, res);
-
-      structuredLog("INFO", "Stripe payment confirmed and Business Tier unlocked", {
-        userId: user.id,
-        email: normalizedEmail,
-        planType,
-      });
-
-      res.json({
-        success: true,
-        user: { ...user, notificationPrefs: {} },
-        token,
-        receiptNumber: `RCPT-${Math.floor(100000 + Math.random() * 900000)}`,
-        message: "Payment successfully verified by Mifeco Stripe Authority. PM Accelerator Business tier unlocked!",
-      });
-    } catch (err: any) {
-      structuredLog("ERROR", "Stripe payment confirmation error", { error: err.message });
-      res.status(500).json({ error: "Failed to confirm payment with Stripe Authority" });
-    }
+  app.post("/api/stripe/confirm-payment", (_req: Request, res: Response) => {
+    res.status(503).json({
+      success: false,
+      code: "PAYMENT_VERIFICATION_UNAVAILABLE",
+      error: "Payment cannot be confirmed here. No account or access has been changed.",
+    });
   });
 
-  // Signed, Idempotent Stripe Webhook Path (Req 6)
-  app.post("/api/stripe/webhook", async (req: Request, res: Response) => {
-    const event = req.body;
-    const eventId = event?.id || `evt_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-    const eventType = event?.type || "checkout.session.completed";
-
-    try {
-      // 1. Check idempotency: avoid duplicate event processing
-      const existing = await db.get("SELECT id FROM stripe_events WHERE id = ?", [eventId]);
-      if (existing) {
-        structuredLog("INFO", "Stripe webhook event already processed (idempotent)", { eventId });
-        return res.status(200).json({ received: true, idempotent: true });
-      }
-
-      // 2. Record event in durable store
-      await db.run(
-        "INSERT INTO stripe_events (id, eventType, processedAt, payload) VALUES (?, ?, ?, ?)",
-        [eventId, eventType, Date.now(), JSON.stringify(event)]
-      );
-
-      // 3. Process entitlement updates
-      const customerEmail = event?.data?.object?.customer_email || event?.customer_email || event?.email;
-      const stripeCustomerId = event?.data?.object?.customer || event?.customer_id;
-
-      if (customerEmail) {
-        const user = await db.get("SELECT id FROM users WHERE email = ?", [customerEmail.toLowerCase()]);
-        if (user) {
-          const isCancellation = eventType === "customer.subscription.deleted";
-          const newPlan = isCancellation ? "free" : "business";
-          const status = isCancellation ? "canceled" : "active";
-
-          await db.run(
-            "UPDATE users SET plan = ?, stripeCustomerId = ? WHERE id = ?",
-            [newPlan, stripeCustomerId || null, user.id]
-          );
-
-          await db.run(
-            `INSERT OR REPLACE INTO entitlements (userId, plan, status, source, stripeCustomerId, expiresAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [user.id, newPlan, status, "stripe_webhook", stripeCustomerId, Date.now() + 30 * 24 * 3600 * 1000, Date.now()]
-          );
-
-          structuredLog("INFO", `Updated user entitlement from webhook ${eventType}`, { userId: user.id, newPlan });
-        }
-      }
-
-      res.status(200).json({ success: true, processed: true, eventId });
-    } catch (err: any) {
-      structuredLog("ERROR", "Stripe webhook handling error", { error: err.message, eventId });
-      res.status(500).json({ error: "Webhook processing failed" });
-    }
+  app.post("/api/stripe/webhook", (_req: Request, res: Response) => {
+    res.status(503).json({
+      received: false,
+      code: "STRIPE_FULFILLMENT_NOT_CONFIGURED",
+    });
   });
 
   // -------------------------------------------------------------
