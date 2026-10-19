@@ -33,14 +33,15 @@ export const MifecoStripeModal: React.FC<MifecoStripeModalProps> = ({
                 </div>
                 <div className="p-6 space-y-4 text-sm text-slate-300">
                     <p>Review current plans and subscription terms on MIFECO. Payment details are entered only on Stripe's hosted checkout.</p>
-                    <p>Automatic subscription activation in this application is not yet verified. Confirm access arrangements with MIFECO before purchasing. Opening checkout or returning from it does not grant paid access.</p>
-                    <a href="https://www.mifeco.com/saas/#accelerator" target="_blank" rel="noopener noreferrer"
+                    <p>Sign in to your application account before opening Stripe. Access is activated only after your payment is verified.</p>
+                    <a href="/?subscribe=1"
                         className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-400">
-                        Review plans on MIFECO <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                        Open subscription access <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </a>
-                    <p className="text-xs text-slate-400">Opens in a new tab. Use your existing application sign-in to check access.</p>
+                    <p className="text-xs text-slate-400">Use your existing application sign-in to check access.</p>
                 </div>
             </section>
         </div>
     );
 };
+

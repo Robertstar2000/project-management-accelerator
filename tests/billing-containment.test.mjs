@@ -33,9 +33,9 @@ for (const path of ['/api/stripe/create-checkout-session', '/api/stripe/confirm-
     }
   });
 }
-test('checkout UI uses MIFECO and never collects cards or confirms payment', () => {
+test('checkout UI uses account-linked subscription entry and never collects cards or confirms payment', () => {
   const modal = readFileSync(new URL('../src/components/MifecoStripeModal.tsx', import.meta.url), 'utf8');
-  assert.match(modal, /href="https:\/\/www.mifeco.com\/saas\/#accelerator"/);
-  assert.match(modal, /rel="noopener noreferrer"/);
+  assert.match(modal, /href="\/\?subscribe=1"/);
   assert.doesNotMatch(modal, /confirm-payment|test_pm_accelerator_business|<input|fetch\(/);
 });
+

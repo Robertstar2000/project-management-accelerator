@@ -1,3 +1,4 @@
+import { BillingAccess } from './components/BillingAccess';
 
 import { GoogleGenAI } from "@google/genai";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -569,6 +570,7 @@ const App = () => {
             </>
         )}
         
+        <BillingAccess />
         <button className="help-fab" onClick={() => setIsHelpModalOpen(true)} aria-label="Open Help">?</button>
         <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
     </>
@@ -576,3 +578,4 @@ const App = () => {
 };
 
 export default App;
+
