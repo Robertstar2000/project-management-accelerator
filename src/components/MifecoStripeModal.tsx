@@ -189,7 +189,7 @@ export const MifecoStripeModal: React.FC<MifecoStripeModalProps> = ({
                                 </div>
                                 <div className="flex items-center gap-2 text-slate-300">
                                     <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                                    <span><strong>Pre-Provisioned Enterprise AI</strong> (Gemini 2.5 Pro & GPT-4o without personal keys)</span>
+                                    <span><strong>Pre-Provisioned Enterprise AI</strong> (Gemini 3.8 Flash, GPT-6.1 Sol & Claude Sonnet 5.5 without personal keys)</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-slate-300">
                                     <Check className="w-4 h-4 text-emerald-400 shrink-0" />

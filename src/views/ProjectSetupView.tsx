@@ -112,6 +112,31 @@ export const ProjectSetupView: React.FC<ProjectSetupViewProps> = ({ onBack, onCr
                 </h1>
             </div>
 
+            {/* Model Requirement Notice Banner */}
+            <div style={{
+                background: 'linear-gradient(135deg, rgba(8, 145, 178, 0.15) 0%, rgba(14, 165, 233, 0.08) 100%)',
+                color: '#E2E8F0',
+                padding: '1.25rem 1.5rem',
+                borderRadius: '12px',
+                marginBottom: '1.5rem',
+                border: '1px solid rgba(6, 182, 212, 0.35)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '1rem',
+                fontSize: '0.9rem',
+                lineHeight: '1.5'
+            }}>
+                <span style={{ fontSize: '1.4rem' }}>⚡</span>
+                <div>
+                    <strong style={{ color: '#38BDF8', display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
+                        Model Capability Requirement Notice
+                    </strong>
+                    <span>
+                        The active LLM model requires <strong>high-level reasoning</strong>, deep <strong>scientific & technical knowledge</strong>, and native ability to produce <strong>images, figures, tables, and drawings</strong> across all 9 lifecycle phases.
+                    </span>
+                </div>
+            </div>
+
             <div style={{ 
                 backgroundColor: 'rgba(250, 204, 21, 0.15)', 
                 color: '#FDE047', 

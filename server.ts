@@ -661,14 +661,14 @@ async function startServer() {
 
       // If provider or model was provided, persist to user's llmConfig in database
       if (provider) {
-        const targetModel = model || (provider === "grok" ? "grok-2-latest" : provider === "openai" ? "gpt-4o" : provider === "anthropic" ? "claude-3-7-sonnet-20250219" : "gemini-3.8-flash");
+        const targetModel = model || (provider === "grok" ? "grok-4.7" : provider === "openai" ? "gpt-6.1-sol" : provider === "anthropic" ? "claude-sonnet-5-5" : "gemini-3.8-flash");
         const configs: Record<string, any> = {
           google: { provider: "google", authMode: "api_key", apiKey: provider === "google" ? (apiKey || "") : "", model: provider === "google" ? targetModel : "gemini-3.8-flash" },
-          openai: { provider: "openai", authMode: "api_key", apiKey: provider === "openai" ? (apiKey || "") : "", model: provider === "openai" ? targetModel : "gpt-4o" },
-          anthropic: { provider: "anthropic", authMode: "api_key", apiKey: provider === "anthropic" ? (apiKey || "") : "", model: provider === "anthropic" ? targetModel : "claude-3-7-sonnet-20250219" },
-          grok: { provider: "grok", authMode: "api_key", apiKey: provider === "grok" ? (apiKey || "") : "", model: provider === "grok" ? targetModel : "grok-2-latest" },
-          ollama: { provider: "ollama", authMode: "api_key", baseUrl: "http://localhost:11434", model: provider === "ollama" ? targetModel : "llama3.3" },
-          openrouter: { provider: "openrouter", authMode: "api_key", apiKey: provider === "openrouter" ? (apiKey || "") : "", model: provider === "openrouter" ? targetModel : "anthropic/claude-3.7-sonnet" },
+          openai: { provider: "openai", authMode: "api_key", apiKey: provider === "openai" ? (apiKey || "") : "", model: provider === "openai" ? targetModel : "gpt-6.1-sol" },
+          anthropic: { provider: "anthropic", authMode: "api_key", apiKey: provider === "anthropic" ? (apiKey || "") : "", model: provider === "anthropic" ? targetModel : "claude-sonnet-5-5" },
+          grok: { provider: "grok", authMode: "api_key", apiKey: provider === "grok" ? (apiKey || "") : "", model: provider === "grok" ? targetModel : "grok-4.7" },
+          ollama: { provider: "ollama", authMode: "api_key", baseUrl: "http://localhost:11434", model: provider === "ollama" ? targetModel : "deepseek-r1:70b" },
+          openrouter: { provider: "openrouter", authMode: "api_key", apiKey: provider === "openrouter" ? (apiKey || "") : "", model: provider === "openrouter" ? targetModel : "anthropic/claude-sonnet-5-5" },
         };
         const settingsPayload = { activeProvider: provider, configs, updatedAt: Date.now() };
         await db.run("UPDATE users SET llmConfig = ? WHERE id = ?", [JSON.stringify(settingsPayload), user.id]);
@@ -1402,8 +1402,8 @@ async function startServer() {
           return res.status(400).json({ error: `${provName} API key is required. Please configure your key in login or settings.` });
         }
 
-        const targetModel = model || (isGrok ? "grok-2-latest" : isOR ? "anthropic/claude-3.7-sonnet" : "gpt-4o");
-        const isReasoning = targetModel.startsWith("o1") || targetModel.startsWith("o3");
+        const targetModel = model || (isGrok ? "grok-4.7" : isOR ? "anthropic/claude-sonnet-5-5" : "gpt-6.1-sol");
+        const isReasoning = targetModel.startsWith("o1") || targetModel.startsWith("o3") || targetModel.startsWith("o4") || targetModel.includes("astra");
 
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -1459,7 +1459,7 @@ async function startServer() {
           return res.status(400).json({ error: "Anthropic API key is required. Please configure your key in login or settings." });
         }
 
-        const targetModel = model || "claude-3-7-sonnet-20250219";
+        const targetModel = model || "claude-sonnet-5-5";
         let userMsg = inputText;
         if (config?.responseMimeType === "application/json" && !userMsg.toLowerCase().includes("json")) {
           userMsg += "\n\nImportant: Output valid JSON only, without any markdown backticks or commentary.";
@@ -1491,7 +1491,7 @@ async function startServer() {
         });
       } else if (provider === "ollama") {
         const host = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-        const targetModel = model || "llama3.3:70b";
+        const targetModel = model || "deepseek-r1:70b";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
