@@ -29,6 +29,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClos
         setCurrentTask(task);
     }, [task]);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleEsc = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onSave(currentTask);
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [isOpen, onClose, onSave, currentTask]);
+
     if (!isOpen) return null;
 
     const handleFieldChange = <K extends keyof Task>(field: K, value: Task[K]) => {
@@ -73,10 +85,23 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({ isOpen, onClos
     
     return (
         <div className="modal-overlay" onClick={() => { onSave(currentTask); onClose(); }}>
-            <div className="modal-content task-detail-modal" onClick={e => e.stopPropagation()}>
+            <div
+                className="modal-content task-detail-modal"
+                onClick={e => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="task-detail-title"
+                tabIndex={-1}
+            >
                 <div className="task-detail-header">
-                    <h2>{currentTask.name}</h2>
-                    <button onClick={() => { onSave(currentTask); onClose(); }} className="button-close">&times;</button>
+                    <h2 id="task-detail-title">{currentTask.name}</h2>
+                    <button
+                        onClick={() => { onSave(currentTask); onClose(); }}
+                        className="button-close"
+                        aria-label="Close modal"
+                    >
+                        &times;
+                    </button>
                 </div>
 
                 <div className="task-detail-body">
